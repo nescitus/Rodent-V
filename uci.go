@@ -154,6 +154,9 @@ func uciLoop() {
 		case "print":
 			PrintBoard(&p)
 
+		case "eval":
+			eval_trace(&p)
+
 		}
 	}
 

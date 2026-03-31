@@ -27,19 +27,30 @@
 //      adjacent file.
 //
 //   5. KING SAFETY
-//      To be ported from Rodent
+//     Partial Publius port as a proof of concept
 //
 
 package main
 
-// --- Bitmasks used in eval only, put into init() to preserve locality ---
+// --- Bitmaks used in eval only, put into init() to preserve locality ---
 var (
-	passedMask [2][64]uint64
-	adjFileMask [8]uint64
+	fileMask = [8]uint64{
+	fileABB,
+	fileBBB,
+	fileCBB,
+	fileDBB,
+	fileEBB,
+	fileFBB,
+	fileGBB,
+	fileHBB,
+}
+	passedMask [2][64]uint64 // see init
+	adjacentFileMask [8]uint64 // see init
+	kingAttack[256]int // king attack curve, see init
 )
 
 func init() {
-	// --- Passed pawn masks ---
+// --- Passed pawn masks ---
 	// passedMask[White][sq]: squares strictly in front of sq on the
 	// same and adjacent files.  A White pawn on sq is "passed" if
 	// none of these squares contain a Black pawn.
@@ -70,19 +81,24 @@ func init() {
 	// adjFileMask[f]: bitboard of the two files neighboring file f.
 	// A pawn is isolated if adjFileMask[file] & ownPawns == 0.
 	for f := 0; f < 8; f++ {
-		adjFileMask[f] = 0
+		adjacentFileMask[f] = 0
 		if f > 0 {
-			adjFileMask[f] |= fileABB << uint(f-1)
+			adjacentFileMask[f] |= fileABB << uint(f-1)
 		}
 		if f < 7 {
-			adjFileMask[f] |= fileABB << uint(f+1)
+			adjacentFileMask[f] |= fileABB << uint(f+1)
 		}
+	}
+
+	// --- King attack table ---
+	for i := 0; i < 255; i++ {
+		kingAttack[i] = 480 * i * i / (i*i + 4200)
 	}
 }
 
 // --- Eval params ---
-var pieceValMG = [7]int{82, 337, 365, 477, 1025, 0, 0}
-var pieceValEG = [7]int{94, 281, 297, 513, 937, 0, 0}
+var pieceValMG = [7]int{ 82, 337, 365, 477, 1025, 0, 0}
+var pieceValEG = [7]int{ 94, 281, 297, 513,  937, 0, 0}
 
 var pstMG = [6][64]int{
 	P: [64]int{
@@ -165,23 +181,54 @@ var pstEG = [6][64]int{
 // passedBonus[color][rank]: centipawn bonus awarded to a passed
 // pawn based on how far it has advanced.  White advances up the
 // board (rank 1 -> 8); Black advances down (rank 8 -> 1).
-var passedBonus = [2][8]int{
+var passedMG = [2][8]int{
 	{0, 25, 30, 35, 40, 45, 50, 0}, // White: rank 1..8
 	{0, 50, 45, 40, 35, 30, 25, 0}, // Black: rank 8..1 (mirrored)
 }
 
-// A struct serving as a scratchpad for evaluation, filled with data
-// gathered in the process.
-type EvalData struct {
-	phase   int
-	mgScore [2]int
-	egScore [2]int
+var passedEG = [2][8]int{
+	{0, 25, 30, 35, 40, 45, 50, 0}, // White: rank 1..8
+	{0, 50, 45, 40, 35, 30, 25, 0}, // Black: rank 8..1 (mirrored)
 }
+
+var kRoot = [64] int {
+    B2, B2, C2, D2, E2, F2, G2, G2,
+    B2, B2, C2, D2, E2, F2, G2, G2,
+    B3, B3, C3, D3, E3, F3, G3, G3,
+    B4, B4, C4, D4, E4, F4, G4, G4,
+    B5, B5, C5, D5, E5, F5, G5, G5,
+    B6, B6, C6, D6, E6, F6, G6, G6,
+    B7, B7, C7, D7, E7, F7, G7, G7,
+    B7, B7, C7, D7, E7, F7, G7, G7,
+}
+
+
+	var bishopPairMG = 30
+	var bishopPairEG = 30
+	var rookHalfMG = 6
+	var rookHalfEG = 6
+	var rookOpenMG = 12
+	var rookOpenEG = 12
+
 
 // evaluate returns the static score for the current position from the
 // perspective of the side to move.  Positive = better for the mover.
 func evaluate(p *Pos) int {
+	return eval_internal(p, false)
+}
+
+// eval_trace describes engine's evaluation
+func eval_trace(p *Pos) int {
+	return eval_internal(p, true)
+}
+
+// eval_internal returns the static score for the current position from the
+// perspective of the side to move.  Positive = better for the mover.
+func eval_internal(p *Pos, shouldReport bool) int {
 	var e EvalData // Golang-specific: it will be initialized as all zeroes
+
+	e.pawnControl[White] = ShiftWPAttacks(p.pieceBB(White, P));
+	e.pawnControl[Black] = ShiftBPAttacks(p.pieceBB(Black, P));
 
 	evaluatePieces(p, &e, White)
 	evaluatePieces(p, &e, Black)
@@ -191,8 +238,8 @@ func evaluate(p *Pos) int {
 	evaluateKing(p, &e, Black)
 
 	// Interpolate between game phases
-	mg := e.mgScore[White] - e.mgScore[Black]
-	eg := e.egScore[White] - e.egScore[Black]
+    mg := e.sumMg(White) - e.sumMg(Black)
+    eg := e.sumEg(White) - e.sumEg(Black)
 	if e.phase > 24 {
 		e.phase = 24
 	}
@@ -207,6 +254,10 @@ func evaluate(p *Pos) int {
 		score = maxEval
 	}
 
+	if shouldReport {
+		e.PrintEvalDetails(p)
+	}
+
 	// Return score from the perspective of the side to move.
 	if p.side == White {
 		return score
@@ -218,15 +269,30 @@ func evaluate(p *Pos) int {
 // and sets game phase in the process
 func evaluatePieces(p *Pos, e *EvalData, side int) {
 	occ := p.occupied()
-	mob := 0
+
+	if p.count[side][B] == 2 {
+		add(e, side, EvalMaterial, bishopPairMG, bishopPairEG)
+	}
+	
+	ksq := p.kingSq[opp(side)];
+	zone := kingAtk[kRoot[ksq]];
 
 	pieces := p.pieceBB(side, N)
 	for pieces != 0 {
 		sq := lsb(pieces)
-		add(e, side, pieceValMG[N], pieceValEG[N])
+		add(e, side, EvalMaterial, pieceValMG[N], pieceValEG[N])
 		addPST(e, side, N, sq)
-		mob = popCount(knightAtk[sq] & ^p.colorBB[side]) - 4
-		add(e, side, 3*mob, 3*mob)
+
+		mob := knightAtk[sq] & ^p.colorBB[side]
+		cnt := popCount(mob) - 4
+		add(e, side, EvalMobility, 3*cnt, 3*cnt)
+
+		att := knightAtk[sq] & zone;
+		if att > 0 {
+             e.attacks[side] += 4 * popCount(att & ^e.pawnControl[opp(side)]);
+			 e.attacks[side] += 3 * popCount(att & e.pawnControl[opp(side)]);
+		}
+
 		e.phase += 1
 		pieces &= pieces - 1
 	}
@@ -234,10 +300,20 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 	pieces = p.pieceBB(side, B)
 	for pieces != 0 {
 		sq := lsb(pieces)
-		add(e, side, pieceValMG[B], pieceValEG[B])
+		add(e, side, EvalMaterial, pieceValMG[B], pieceValEG[B])
 		addPST(e, side, B, sq)
-		mob = popCount(bishopAttacks(occ, sq)) - 6
-		add(e, side, 5*mob, 4*mob)
+
+		mob := bishopAttacks(occ, sq)
+		cnt := popCount(mob) - 6
+		add(e, side, EvalMobility, 5*cnt, 4*cnt)
+
+		transparent := occ ^ p.pieceBB(side, Q)
+		att := bishopAttacks(transparent, sq) & zone;
+		if att > 0 {
+             e.attacks[side] += 4 * popCount(att & ^e.pawnControl[opp(side)]);
+			 e.attacks[side] += 3 * popCount(att & e.pawnControl[opp(side)]);
+		}
+
 		e.phase += 1
 		pieces &= pieces - 1
 	}
@@ -245,10 +321,30 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 	pieces = p.pieceBB(side, R)
 	for pieces != 0 {
 		sq := lsb(pieces)
-		add(e, side, pieceValMG[R], pieceValEG[R])
+		add(e, side, EvalMaterial, pieceValMG[R], pieceValEG[R])
 		addPST(e, side, R, sq)
-		mob = popCount(rookAttacks(occ, sq)) - 7
-		add(e, side, 3*mob, 2*mob)
+
+		mob := rookAttacks(occ, sq)
+		cnt := popCount(mob) - 7
+		add(e, side, EvalMobility, 3*cnt, 2*cnt)
+
+		transparent := occ ^ p.pieceBB(side, Q) ^ p.pieceBB(side, R);
+		att := rookAttacks(transparent, sq) & zone;
+		if att > 0 {
+             e.attacks[side] += 6 * popCount(att & ^e.pawnControl[opp(side)]);
+			 e.attacks[side] += 4 * popCount(att & e.pawnControl[opp(side)]);
+		}
+
+		file := fileMask[fileOf(sq)]
+
+		if (file & p.pieceBB(side, P)) == 0 {
+			if (file & p.pieceBB(opp(side), P)) != 0 {
+				add(e, side, EvalOther, rookHalfMG, rookHalfEG)
+			} else {
+				add(e, side, EvalOther, rookOpenMG, rookOpenEG)
+			}
+	}
+ 
 		e.phase += 2
 		pieces &= pieces - 1
 	}
@@ -256,13 +352,30 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 	pieces = p.pieceBB(side, Q)
 	for pieces != 0 {
 		sq := lsb(pieces)
-		add(e, side, pieceValMG[Q], pieceValEG[Q])
+		add(e, side, EvalMaterial, pieceValMG[Q], pieceValEG[Q])
 		addPST(e, side, Q, sq)
-		mob = popCount(queenAttacks(occ, sq)) - 14
-		add(e, side, 2*mob, 2*mob)
+
+		mob := queenAttacks(occ, sq)
+		cnt := popCount(mob) - 14
+		add(e, side, EvalMobility, 2*cnt, 2*cnt)
+
+		transparent := occ ^ p.pieceBB(side, Q) ^ p.pieceBB(side, R);
+		att := rookAttacks(transparent, sq);
+		transparent = occ ^ p.pieceBB(side, Q) ^ p.pieceBB(side, B);
+		att |= bishopAttacks(transparent, sq);
+		att &= zone;
+
+		if att > 0 {
+             e.attacks[side] += 9 * popCount(att & ^e.pawnControl[opp(side)]);
+			 e.attacks[side] += 6 * popCount(att & e.pawnControl[opp(side)]);
+		}
+
 		e.phase += 4
 		pieces &= pieces - 1
 	}
+
+    attCount := kingAttack[min(e.attacks[side],255)];
+    e.mgScore[side][EvalSafety] += attCount;
 }
 
 // evaluatePawns scores the pawn structure for one side.
@@ -280,16 +393,16 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 
 	for pieces != 0 {
 		sq := lsb(pieces)
-		add(e, side, pieceValMG[P], pieceValEG[P])
+		add(e, side, EvalMaterial, pieceValMG[P], pieceValEG[P])
 		addPST(e, side, P, sq)
 
 		// Passed pawn: no enemy pawns in front on same or adjacent files.
 		if passedMask[side][sq]&p.pieceBB(opp(side), P) == 0 {
-			add(e, side, passedBonus[side][rankOf(sq)], passedBonus[side][rankOf(sq)])
+			add(e, side, EvalPassers, passedMG[side][rankOf(sq)], passedEG[side][rankOf(sq)])
 		}
 		// Isolated pawn: no friendly pawns on adjacent files.
-		if adjFileMask[fileOf(sq)]&p.pieceBB(side, P) == 0 {
-			add(e, side, -20, -20)
+		if adjacentFileMask[fileOf(sq)]&p.pieceBB(side, P) == 0 {
+			add(e, side, EvalPawns, -20, -20)
 		}
 		pieces &= pieces - 1
 	}
@@ -307,16 +420,16 @@ func evaluateKing(p *Pos, e *EvalData, side int) {
 // addPST adds the piece-square table score for a piece on sq.
 func addPST(e *EvalData, side, piece, sq int) {
 	if side == White {
-		add(e, side, pstMG[piece][sq], pstEG[piece][sq])
+		add(e, side, EvalPst, pstMG[piece][sq], pstEG[piece][sq])
 		return
 	}
 
 	msq := sq ^ 56
-	add(e, side, pstMG[piece][msq], pstEG[piece][msq])
+	add(e, side, EvalPst, pstMG[piece][msq], pstEG[piece][msq])
 }
 
 // add adds MG/EG scores for one side to EvalData.
-func add(e *EvalData, side, mg, eg int) {
-	e.mgScore[side] += mg
-	e.egScore[side] += eg
+func add(e *EvalData, side int, component EvalComponent, mg, eg int) {
+	e.mgScore[side][component] += mg
+	e.egScore[side][component] += eg
 }
