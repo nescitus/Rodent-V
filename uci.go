@@ -83,7 +83,7 @@ func uciLoop() {
 
 		switch tokens[0] {
 		case "uci":
-			fmt.Println("id name Rodent V 0.2.4")
+			fmt.Println("id name Rodent V 0.2.5")
 			fmt.Println("id author Naman Thanki, Pawel Koziol, based on Sungorus by Pablo Vazquez")
 			fmt.Println("option name Hash type spin default 16 min 1 max 4096")
 			fmt.Println("option name Clear Hash type button")

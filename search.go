@@ -57,20 +57,48 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"sync/atomic"
 	"time"
 )
 
 // Global search state.
 var (
-	timeLimit       int64  // allocated move time in ms (-1 = unlimited)
-	pondering       bool   // true while in ponder mode (ignore clock)
-	rootDepth       int    // current iterative deepening depth
-	nodes           int64  // total nodes searched (search-goroutine only; no atomic needed)
-	abortFlag       int32  // set to 1 atomically to stop the search
-	searchStart     int64  // Unix ms at the start of think()
-	rootHistLen     int    // p.histLen at the moment think() began; used by repetition detection
+	timeLimit   int64  // allocated move time in ms (-1 = unlimited)
+	pondering   bool   // true while in ponder mode (ignore clock)
+	rootDepth   int    // current iterative deepening depth
+	nodes       int64  // total nodes searched (search-goroutine only; no atomic needed)
+	abortFlag   int32  // set to 1 atomically to stop the search
+	searchStart int64  // Unix ms at the start of think()
 )
+
+var lmr [64][64]int
+
+func init() {
+	initLMR()
+}
+
+func initLMR() {
+	for d := 0; d < 64; d++ {
+		for m := 0; m < 64; m++ {
+			if d < 3 || m < 4 {
+				lmr[d][m] = 0
+				continue
+			}
+
+			r := math.Log(float64(d)) * math.Log(float64(m)) / 1.8
+			ri := int(r + 0.5) // round to nearest
+
+			if ri < 1 {
+				ri = 1
+			} else if ri > 5 {
+				ri = 5
+			}
+
+			lmr[d][m] = ri
+		}
+	}
+}
 
 // think is the top-level search entry point called from the UCI loop.
 // It performs iterative deepening from depth 1 to maxDepth, outputting
@@ -81,7 +109,6 @@ func think(p *Pos, maxDepth int) {
 	nodes = 0
 	atomic.StoreInt32(&abortFlag, 0)
 	searchStart = time.Now().UnixMilli()
-	rootHistLen = p.histLen
 
 	var pv [maxPly]int
 	for rootDepth = 1; rootDepth <= maxDepth; rootDepth++ {
@@ -131,14 +158,8 @@ func search(p *Pos, ply, alpha, beta, depth int, pv []int) int {
 	if !isRoot {
 		pv[0] = 0
 	}
-	if !isRoot {
-		// A position repeated from earlier in the game tree is a draw.
-		if isRepetition(p) {
-			return 0
-		}
-	}
-	// Insufficient material (applies at all plies including root).
-	if p.isInsufficientMaterial() {
+	// A position repeated from earlier in the game tree is a draw.
+	if !isRoot && isRepetition(p) {
 		return 0
 	}
 
@@ -181,6 +202,8 @@ func search(p *Pos, ply, alpha, beta, depth int, pv []int) int {
 		}
 	}
 
+	var bestMove int;
+
 	// --- Main move loop ---
 	best := -inf
 	picker := &moveBuffers[ply]
@@ -210,11 +233,21 @@ func search(p *Pos, ply, alpha, beta, depth int, pv []int) int {
 
 		// Late move reduction
 		isReduced := false
-		if stage == StageQuiet && !isPv && depth > 2 && !nodeInCheck && !p.inCheck() && movesTried > 3 {
+		if stage == StageQuiet && depth > 2 && !nodeInCheck && !p.inCheck() && movesTried > 3 {
 
-			score = -search(p, ply+1, -beta, -alpha, newDepth-1, childPv[:])
-			if score <= alpha {
-				isReduced = true
+			reduction := lmr[min(depth, 63)][min(movesTried, 63)]
+
+			if (reduction > 0) {
+				if (!isPv) {
+					reduction++
+				}
+				if (reduction > newDepth-1) {
+					reduction = newDepth - 1
+				}
+				score = -search(p, ply+1, -alpha-1, -alpha, newDepth-reduction, childPv[:])
+				if score <= alpha {
+					isReduced = true
+				}
 			}
 		}
 
@@ -249,6 +282,7 @@ func search(p *Pos, ply, alpha, beta, depth int, pv []int) int {
 			best = score
 			if score > alpha {
 				alpha = score
+				bestMove = move
 				buildPV(pv, childPv[:], move)
 				if isRoot {
 					reportInfo(score, pv)
@@ -265,14 +299,8 @@ func search(p *Pos, ply, alpha, beta, depth int, pv []int) int {
 		return 0 // stalemate
 	}
 
-	// 50-move rule: only reached when there are legal moves, so checkmate
-	// and stalemate have already been handled above and take priority.
-	if !isRoot && p.clock >= 100 {
-		return 0
-	}
-
 	// Store the result in the TT with the appropriate bound type.
-	if pv[0] != 0 {
+	if bestMove != 0 {
 		updateHistory(p, pv[0], depth, ply)
 		storeTT(p.key, pv[0], best, EXACT, depth, ply)
 	} else {
@@ -298,9 +326,6 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 
 	// Repetition detection
 	if isRepetition(p) {
-		return 0
-	}
-	if p.clock >= 100 || p.isInsufficientMaterial() {
 		return 0
 	}
 
@@ -358,36 +383,14 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 	return best
 }
 
-// isRepetition returns true if the current position is a draw by repetition.
-//
-// Two rules apply depending on where the prior occurrence lives:
-//
-//   In-tree (keyHist index >= rootHistLen): the position was created during
-//   the current search. One prior occurrence is enough to return draw — the
-//   opponent can always force the third occurrence on the real board.
-//
-//   In-history (keyHist index < rootHistLen): the position existed before the
-//   search started. Strict threefold requires two prior occurrences (three
-//   total) before we can claim a forced draw.
-//
-// We step back in increments of 2 (same side to move) and stop at the
-// 50-move clock boundary, since repetitions cannot cross an irreversible move.
+// isRepetition returns true if the current position has appeared at
+// least once before in the game history (2-fold repetition).
+// We step back in increments of 2 (same side to move) and compare
+// Zobrist keys; the 50-move clock limits how far back we look.
 func isRepetition(p *Pos) bool {
-	reps := 0
 	for i := 4; i <= p.clock; i += 2 {
-		idx := p.histLen - i
-		if idx < 0 {
-			break
-		}
-		if p.key != p.keyHist[idx] {
-			continue
-		}
-		if idx >= rootHistLen {
-			return true // in-tree: one occurrence is enough
-		}
-		reps++
-		if reps >= 2 {
-			return true // in-history: need two prior occurrences
+		if p.key == p.keyHist[p.histLen-i] {
+			return true
 		}
 	}
 	return false
