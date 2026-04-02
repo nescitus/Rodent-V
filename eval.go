@@ -36,6 +36,17 @@ package main
 var (
 	passedMask  [2][64]uint64
 	adjFileMask [8]uint64
+
+	fileMask = [8]uint64{
+	fileABB,
+	fileBBB,
+	fileCBB,
+	fileDBB,
+	fileEBB,
+	fileFBB,
+	fileGBB,
+	fileHBB,
+	}
 )
 
 func init() {
@@ -161,6 +172,11 @@ var pstEG = [6][64]int{
 		-12, 19, 16, 16, 15, 40, 25, 12, -74, -34, -18, -20, -13, 17, 5, -19,
 	},
 }
+
+	var rookHalfMG = 6
+	var rookHalfEG = 6
+	var rookOpenMG = 12
+	var rookOpenEG = 12
 
 // passedBonus[color][rank]: centipawn bonus awarded to a passed
 // pawn based on how far it has advanced.  White advances up the
@@ -289,6 +305,18 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 			e.attackWt[side] += kingAttackerWeight[R]
 			e.attackCnt[side] += popCount(ringAtks)
 		}
+
+		// Rook on open/half open file
+		file := fileMask[fileOf(sq)]
+
+		if (file & p.pieceBB(side, P)) == 0 {
+			if (file & p.pieceBB(opp(side), P)) != 0 {
+				add(e, side, EvalOther, rookHalfMG, rookHalfEG)
+			} else {
+				add(e, side, EvalOther, rookOpenMG, rookOpenEG)
+			}
+		}
+
 		e.phase += 2
 		pieces &= pieces - 1
 	}
