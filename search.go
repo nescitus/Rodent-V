@@ -506,6 +506,10 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 			if move == 0 {
 				break
 			}
+
+			if isBadCapture(p, move) {
+				continue
+			}
 		}
 
 		var u Undo
