@@ -180,7 +180,7 @@ func think(p *Pos, maxDepth int) {
 	contValid = [maxPly]bool{} // reset cont hist context; stale entries from prev search must not be used
 
 	var pv [maxPly]int
-	score := 0
+	//score := 0
 
 	for rootDepth = 1; rootDepth <= maxDepth; rootDepth++ {
 		// Before starting a new depth, do an unthrottled time check.
@@ -197,46 +197,12 @@ func think(p *Pos, maxDepth int) {
 			}
 		}
 
-		var iterScore int
-
-		if rootDepth < 5 {
-			// Aspiration windows are unreliable at shallow depths.
-			iterScore = search(p, 0, -inf, inf, rootDepth, false, pv[:])
-		} else {
-			// Score-adaptive initial delta: balanced positions get a tight
-			// window; large scores widen it to reduce retry churn.
-			delta := 25 + score*score/16384
-			alpha := max(-inf, score-delta)
-			beta := min(inf, score+delta)
-			aspDepth := rootDepth
-
-			for {
-				iterScore = search(p, 0, alpha, beta, aspDepth, false, pv[:])
-				if atomic.LoadInt32(&abortFlag) != 0 {
-					break
-				}
-				if iterScore <= alpha {
-					// Fail low: collapse beta to the midpoint before widening
-					// alpha so the high side doesn't grow unnecessarily.
-					beta = (alpha + beta) / 2
-					alpha = max(-inf, alpha-delta)
-					aspDepth = rootDepth
-				} else if iterScore >= beta {
-					// Fail high: widen the window above and retry at a slightly
-					// reduced depth to keep volatile re-searches cheaper.
-					beta = min(inf, beta+delta)
-					aspDepth = max(rootDepth-1, 1)
-				} else {
-					break // score is inside the window
-				}
-				delta += delta / 2 // proportional widening (×1.5)
-			}
-		}
-
+		//var iterScore int
+		search(p, 0, -inf, inf, rootDepth, false, pv[:])
 		if atomic.LoadInt32(&abortFlag) != 0 {
 			break
 		}
-		score = iterScore
+		//score = iterScore
 	}
 
 	if pv[0] != 0 {
@@ -278,7 +244,12 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		return 0
 	}
 
+	score := 0
 	isRoot := (ply == 0)
+	ttMove := 0
+	if isRoot {
+		ttMove = pv[0]
+	}
 
 	if !isRoot {
 		pv[0] = 0
@@ -289,32 +260,9 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		}
 	}
 
-	// --- Mate distance pruning ---
-	// Tighten the window based on the best/worst mate reachable from this ply.
-	// If we already have a proven mate, skip searching slower mates.
-	if !isRoot {
-		alpha = max(alpha, -mate+ply)
-		beta = min(beta, mate-ply-1)
-		if alpha >= beta {
-			return alpha
-		}
-	}
-
 	// Are we in the pv node?
-	isPv := (beta > alpha+1)
+	//isPv := (beta > alpha+1)
 	movesTried := 0
-
-	// --- Transposition table probe ---
-	ttMove := 0
-	ttFlag := 0
-	ttDepth := 0
-	score := 0
-	if probeTT(p.key, &ttMove, &score, &ttFlag, &ttDepth, alpha, beta, depth, ply) {
-		if !isPv && excludedMove[ply] == 0 {
-			return score
-		}
-	}
-	ttScore := score // save TT score before NMP/LMR overwrites the score variable
 
 	// Safeguard against hitting max ply limit
 	if ply >= maxPly-1 {
@@ -338,134 +286,6 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		evalStack[ply] = noEval
 	}
 
-	// --- Improving heuristic ---
-	// "Improving" means our static eval is better than it was two plies ago
-	// (our previous turn). When improving we use tighter pruning margins —
-	// the position is trending up so we are less likely to collapse below beta.
-	// Default to true when no prior eval is available (early plies, post-check).
-	improving := true
-	if nodeInCheck {
-		improving = false
-	} else if ply >= 2 && evalStack[ply-2] != noEval {
-		improving = staticEval > evalStack[ply-2]
-	} else if ply >= 4 && evalStack[ply-4] != noEval {
-		improving = staticEval > evalStack[ply-4]
-	}
-
-	// --- Reverse futility pruning ---
-	// If the static eval beats beta by a depth-scaled margin, the position
-	// is already so good that a full search is unlikely to fall below beta.
-	// The mate guard prevents pruning when beta is a mate score, where the
-	// static eval is unreliable.  We return the margin-adjusted value rather
-	// than the raw static eval to avoid inflating the returned score.
-
-	// Use a tighter margin when improving (position is gaining ground).
-	// Wider margin when not improving avoids over-pruning a deteriorating line.
-	rfpDepthMargin := rfpMargin
-	if improving {
-		rfpDepthMargin = rfpImpMargin
-	}
-	if !isPv && !nodeInCheck && !wasNull && depth <= 7 && beta < mate-maxPly &&
-		excludedMove[ply] == 0 &&
-		staticEval-rfpDepthMargin*depth >= beta {
-		return staticEval - rfpDepthMargin*depth
-	}
-
-	// --- Razoring ---
-	// If static eval is far below alpha at shallow depth, the position is
-	// unlikely to improve enough with quiet moves. Drop into qsearch; if
-	// qsearch also fails low, return immediately without searching further.
-	if !isPv && !nodeInCheck && !wasNull && depth <= 3 &&
-		excludedMove[ply] == 0 &&
-		staticEval <= alpha-razorMargin*depth {
-		s := quiesce(p, ply, alpha, beta, pv)
-		if s <= alpha {
-			return s
-		}
-	}
-
-	// --- Null-move pruning ---
-	// Skip if: depth <= 1 (too shallow to be reliable), the position
-	// is already beyond beta, we are in check, or only pawns remain.
-	// Reduction = base + depth/depthDiv + min((eval-beta)/evalDiv, maxEvalBonus).
-	if depth > 1 && !isPv && !nodeInCheck && !wasNull && p.canNullMove() && beta <= staticEval &&
-		excludedMove[ply] == 0 {
-		contValid[ply] = false // null move: no valid piece context for cont hist
-		reduction := nmpBaseReduction + depth/nmpDepthReduction
-		var u Undo
-		makeNullMove(p, &u)
-		var nullPv [maxPly]int
-		score = -search(p, ply+1, -beta, -beta+1, depth-1-reduction, true, nullPv[:])
-		unmakeNullMove(p, &u)
-		if atomic.LoadInt32(&abortFlag) != 0 {
-			return 0
-		}
-
-		// --- Null move verification DISABLED ---
-
-		//if depth - reduction > 5 && score >= beta {
-		//    score = search(p, ply, alpha, beta, depth - reduction - 4, true, pv);
-		//}
-
-		//if atomic.LoadInt32(&abortFlag) != 0 {
-		//	return 0
-		//}
-
-		if score >= beta {
-			return score
-		}
-	}
-
-	// --- ProbCut ---
-	// If a tactical move already exceeds beta by a safety margin at reduced
-	// depth, assume the full node will also fail high and prune the rest.
-	if !isPv && !nodeInCheck && depth >= probcutMinDepth && beta < mate-maxPly &&
-		excludedMove[ply] == 0 {
-		probcutBeta := min(beta+probcutMargin, mate-maxPly)
-		probcutDepth := depth - 1 - probcutReduction
-		probcutPicker := &moveBuffers[ply]
-		initQSearch(p, probcutPicker)
-		var probcutPv [maxPly]int
-
-		for {
-			move := probcutPicker.nextCapture()
-			if move == 0 {
-				break
-			}
-			if isBadCapture(p, move) {
-				continue
-			}
-
-			var u Undo
-			makeMove(p, move, &u)
-			if p.selfInCheck() {
-				unmakeMove(p, move, &u)
-				continue
-			}
-
-			score = -quiesce(p, ply+1, -probcutBeta, -probcutBeta+1, probcutPv[:])
-			if score >= probcutBeta && probcutDepth > 0 {
-				score = -search(p, ply+1, -probcutBeta, -probcutBeta+1, probcutDepth, false, probcutPv[:])
-			}
-			unmakeMove(p, move, &u)
-
-			if atomic.LoadInt32(&abortFlag) != 0 {
-				return 0
-			}
-			if score >= probcutBeta {
-				return score
-			}
-		}
-	}
-
-	// --- Internal iterative reduction ---
-	// Without a TT move the move picker has no good hint; search one
-	// ply shallower so the cost of poor ordering is contained.
-	// Skipped in check: evasions must be searched at full depth.
-	if ttMove == 0 && depth >= 4 && !nodeInCheck {
-		depth--
-	}
-
 	var bestMove int
 	origAlpha := alpha
 
@@ -478,7 +298,7 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	quietTried := 0
 	// quietsMade tracks quiet moves that were fully searched without causing
 	// a beta cutoff.  On a cutoff we apply a malus to all of them.
-	var quietsMade [maxMoves]int
+	//var quietsMade [maxMoves]int
 	quietsMadeCount := 0
 
 	for {
@@ -492,36 +312,7 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 			continue
 		}
 
-		// --- Singular extension ---
-		// When the TT move is reliable and deep enough, check if it's the
-		// only good move by searching without it at reduced depth. If all
-		// other moves fail below a margin, extend this move by +1 ply.
-		// Negative extension: if the position isn't singular AND the TT
-		// score already beats beta, reduce aggressively (multi-cut signal).
 		extension := 0
-		if move == ttMove &&
-			excludedMove[ply] == 0 &&
-			depth >= 8 &&
-			ttDepth >= depth-3 &&
-			ttFlag != UPPER &&
-			abs(ttScore) < mate-maxPly {
-			sBeta := ttScore - seBetaMargin*depth
-			// The SE sub-search calls search(p, ply, ...) which reinitialises
-			// moveBuffers[ply], destroying the main loop's picker state.
-			// Save and restore the picker around the sub-search.
-			savedPicker := *picker
-			excludedMove[ply] = move
-			var sePv [maxPly]int
-			sScore := search(p, ply, sBeta-1, sBeta, (depth-1)/2, false, sePv[:])
-			excludedMove[ply] = 0
-			*picker = savedPicker
-			if sScore < sBeta {
-				extension = 1
-				if !isPv && sScore < sBeta-seDoubleMargin {
-					extension = 2
-				}
-			}
-		}
 
 		// Capture piece type before makeMove — after the call the square
 		// may hold a promoted piece rather than the original pawn.
@@ -550,70 +341,12 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 			newDepth++
 		}
 
-		// Late move pruning: skip quiet moves beyond the threshold.
-		// Moves that give check are exempt — they may be the only defence
-		// or the only escape from a mating attack.
-		// When improving we allow more moves (position is trending up, so
-		// later moves are more likely to be relevant).
-		lmpThreshold := 4*depth + 1
-		if improving {
-			lmpThreshold = 6*depth + 1
-		}
-		if stage == StageQuiet && !isPv && !nodeInCheck && depth < 4 &&
-			quietTried > lmpThreshold && !givesCheck {
-			unmakeMove(p, move, &u)
-			continue
-		}
-
-		// Futility pruning: at shallow depth, skip late quiet moves that
-		// cannot plausibly raise alpha even with a generous margin.
-		if stage == StageQuiet && !isPv && !nodeInCheck && !givesCheck &&
-			excludedMove[ply] == 0 && depth <= fpMaxDepth &&
-			quietTried > 0 && alpha < mate-maxPly &&
-			staticEval+fpMargin*depth <= alpha {
-			unmakeMove(p, move, &u)
-			continue
-		}
 		if stage == StageQuiet {
 			quietTried++
 		}
 
-		// Late move reduction
-		isReduced := false
-		if stage == StageQuiet && depth > 2 && !nodeInCheck && !givesCheck && movesTried >= 4 {
-			reduction := lmr[min(depth, 63)][min(movesTried, 63)]
-			if reduction > 0 {
-				if !isPv {
-					reduction++
-				}
-				// Not improving: position is trending down, reduce more aggressively.
-				if !improving {
-					reduction++
-				}
-				if reduction > newDepth-1 {
-					reduction = newDepth - 1
-				}
-				score = -search(p, ply+1, -alpha-1, -alpha, newDepth-reduction, false, childPv[:])
-				if score <= alpha {
-					isReduced = true
-				}
-			}
-		}
+		score = -search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
 
-		// Principal Variation Search:
-		// First move: full window.
-		// Subsequent moves: zero-width window first; re-search with full window
-		// only if the ZW fails high AND we are at a PV node.
-		if !isReduced {
-			if movesTried == 0 {
-				score = -search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
-			} else {
-				score = -search(p, ply+1, -alpha-1, -alpha, newDepth, false, childPv[:])
-				if score > alpha && isPv {
-					score = -search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
-				}
-			}
-		}
 		unmakeMove(p, move, &u)
 		movesTried++
 
@@ -626,24 +359,20 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		// to every quiet that was searched before this one — they failed to
 		// cut off and should be tried later in future sibling nodes.
 		if score >= beta {
-			if isQuiet(p, move) {
-				updateHistory(p, move, depth, ply, quietsMade[:quietsMadeCount])
-			}
+			//if isQuiet(p, move) {
+			//	updateHistory(p, move, depth, ply, quietsMade[:quietsMadeCount])
+			//}
 			if excludedMove[ply] == 0 {
 				storeTT(p.key, move, score, LOWER, depth, ply)
 			}
-			// Update correction history on beta cutoff.
-			if !nodeInCheck && isQuiet(p, move) &&
-				!(score <= staticEval) {
-				addCorrection(p, depth, score-rawEval)
-			}
+
 			return score
 		}
 
 		// Record this quiet as searched-but-failed so we can penalise it
 		// if a later move causes a cutoff.
 		if stage == StageQuiet && quietsMadeCount < maxMoves {
-			quietsMade[quietsMadeCount] = move
+			//quietsMade[quietsMadeCount] = move
 			quietsMadeCount++
 		}
 
@@ -683,28 +412,17 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	// Store the result in the TT with the appropriate bound type.
 	// Skip during singular extension sub-searches: their partial results
 	// (with one move excluded) must not corrupt the main TT entries.
-	bound := UPPER
+	//bound := UPPER
 	if excludedMove[ply] == 0 {
 		if bestScore > origAlpha {
-			bound = EXACT
+			//bound = EXACT
 			if isQuiet(p, bestMove) {
-				updateHistory(p, bestMove, depth, ply, nil)
+				//	updateHistory(p, bestMove, depth, ply, nil)
 			}
-			storeTT(p.key, bestMove, bestScore, EXACT, depth, ply)
+			//storeTT(p.key, bestMove, bestScore, EXACT, depth, ply)
 		} else {
-			storeTT(p.key, 0, bestScore, UPPER, depth, ply)
+			//storeTT(p.key, 0, bestScore, UPPER, depth, ply)
 		}
-	}
-
-	// Update correction history: adjust the correction table when the
-	// search result disagrees with the raw static eval.  Skip when in check
-	// (no reliable eval), when the best move is tactical, or when the bound
-	// direction is consistent with the eval (no useful correction signal).
-	if !nodeInCheck && excludedMove[ply] == 0 &&
-		!(bestMove != 0 && !isQuiet(p, bestMove)) &&
-		!((bound == LOWER && bestScore <= staticEval) ||
-			(bound == UPPER && bestScore >= staticEval)) {
-		addCorrection(p, depth, bestScore-rawEval)
 	}
 
 	return bestScore
@@ -747,17 +465,8 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		return evaluate(p)
 	}
 
-	// TT probe: use depth=0 for all qsearch entries.
-	ttMove := 0
-	ttScore := 0
-	ttFlag := 0
-	ttDepth := 0
-	if probeTT(p.key, &ttMove, &ttScore, &ttFlag, &ttDepth, alpha, beta, 0, ply) {
-		return ttScore
-	}
-
-	origAlpha := alpha
-	bestMove := 0
+	//origAlpha := alpha
+	//bestMove := 0
 
 	inCheck := p.inCheck()
 
@@ -767,7 +476,7 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 	// Stand-pat: outside of check we may decline all captures.
 	// In check we must find an evasion, so stand-pat is illegal.
 	best := -inf
-	futilityBase := -inf
+	//futilityBase := -inf
 	if !inCheck {
 		rawQEval := evaluate(p)
 		best = rawQEval + getCorrection(p)
@@ -778,10 +487,10 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		if best > alpha {
 			alpha = best
 		}
-		futilityBase = best + qsFpMargin
+		//futilityBase = best + qsFpMargin
 		initQSearch(p, picker)
 	} else {
-		initMovePicker(p, picker, ttMove, ply)
+		initMovePicker(p, picker, 0, ply)
 	}
 
 	movesTried := 0
@@ -796,22 +505,6 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 			move = picker.nextCapture()
 			if move == 0 {
 				break
-			}
-			if isBadCapture(p, move) {
-				continue
-			}
-			futility := futilityBase
-			if moveType(move) == EP_CAP {
-				futility += pieceValue[P]
-			} else if p.board[moveTo(move)] != NO_PC {
-				futility += pieceValue[p.typeAt(moveTo(move))]
-			}
-			if isProm(move) {
-				futility += pieceValue[promType(move)] - pieceValue[P]
-			}
-			if futility <= alpha {
-				best = max(best, futility)
-				continue
 			}
 		}
 
@@ -836,12 +529,12 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 			return 0
 		}
 		if score >= beta {
-			storeTT(p.key, move, score, LOWER, 0, ply)
+			//storeTT(p.key, move, score, LOWER, 0, ply)
 			return score
 		}
 		if score > best {
 			best = score
-			bestMove = move
+			//bestMove = move
 			if score > alpha {
 				alpha = score
 				buildPV(pv, childPv[:], move)
@@ -854,13 +547,6 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		return -mate + ply
 	}
 
-	if atomic.LoadInt32(&abortFlag) == 0 {
-		if best > origAlpha {
-			storeTT(p.key, bestMove, best, EXACT, 0, ply)
-		} else {
-			storeTT(p.key, 0, best, UPPER, 0, ply)
-		}
-	}
 	return best
 }
 
