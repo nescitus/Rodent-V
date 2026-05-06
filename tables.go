@@ -132,7 +132,8 @@ const (
 	seBetaMargin      = 6        // centipawns per ply subtracted from ttScore for singular verification
 	seDoubleMargin    = 64       // extra centipawns below singular beta needed for a double extension
 	razorMargin       = 300      // centipawns per depth for razoring
-	qsFpMargin        = 100      // base margin for quiescence futility pruning
+	qsFpPawnMargin    = 300      // qs futility margin when capturing a pawn (passers warrant extra slack)
+	qsFpPieceMargin   = 200      // qs futility margin when capturing a piece
 	qsLmpLimit        = 2        // max captures tried per qs node (outside check) to cap explosion
 )
 

@@ -476,7 +476,6 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 	// Stand-pat: outside of check we may decline all captures.
 	// In check we must find an evasion, so stand-pat is illegal.
 	best := -inf
-	//futilityBase := -inf
 	if !inCheck {
 		rawQEval := evaluate(p)
 		best = rawQEval + getCorrection(p)
@@ -487,7 +486,6 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		if best > alpha {
 			alpha = best
 		}
-		//futilityBase = best + qsFpMargin
 		initQSearch(p, picker)
 	} else {
 		initMovePicker(p, picker, 0, ply)
@@ -508,6 +506,28 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 			}
 
 			if isBadCapture(p, move) {
+				continue
+			}
+
+			// Use a higher margin for pawn captures: passers can have
+			// wildly different values so we give them extra slack.
+			var margin int
+			if moveType(move) == EP_CAP || p.typeAt(moveTo(move)) == P {
+				margin = qsFpPawnMargin
+			} else {
+				margin = qsFpPieceMargin
+			}
+			futility := best + margin
+			if moveType(move) == EP_CAP {
+				futility += pieceValue[P]
+			} else if p.board[moveTo(move)] != NO_PC {
+				futility += pieceValue[p.typeAt(moveTo(move))]
+			}
+			if isProm(move) {
+				futility += pieceValue[promType(move)] - pieceValue[P]
+			}
+			if futility <= alpha {
+				best = max(best, futility)
 				continue
 			}
 		}
