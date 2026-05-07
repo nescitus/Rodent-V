@@ -261,7 +261,7 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	}
 
 	// Are we in the pv node?
-	//isPv := (beta > alpha+1)
+	isPv := (beta > alpha+1)
 	movesTried := 0
 
 	// Safeguard against hitting max ply limit
@@ -345,7 +345,19 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 			quietTried++
 		}
 
-		score = -search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
+		// Principal Variation Search (PVS):
+		// We assume the first move is the best and search it with a full window.
+		// For subsequent moves, we use a Null-Window Search (-alpha-1, -alpha)
+		// to quickly prove they are worse than the PV. If a move fails high,
+		// we re-search it with the full window to find its true value.
+		if movesTried == 0 {
+			score = -search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
+		} else {
+			score = -search(p, ply+1, -alpha-1, -alpha, newDepth, false, childPv[:])
+			if score > alpha && isPv {
+				score = -search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
+			}
+		}
 
 		unmakeMove(p, move, &u)
 		movesTried++
