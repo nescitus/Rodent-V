@@ -521,6 +521,11 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 				continue
 			}
 
+			// Prune non-queen promotions in QS.
+			if isProm(move) && moveType(move) != Q_PROM {
+				continue
+			}
+
 			// Use a higher margin for pawn captures: passers can have
 			// wildly different values so we give them extra slack.
 			var margin int
