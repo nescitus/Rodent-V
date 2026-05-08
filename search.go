@@ -440,6 +440,139 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	return bestScore
 }
 
+func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
+	nodes++
+	if ply > selDepth {
+		selDepth = ply
+	}
+	checkTime()
+	if atomic.LoadInt32(&abortFlag) != 0 {
+		return 0
+	}
+
+	pv[0] = 0
+
+	// Repetition detection
+	if isRepetition(p) {
+		return 0
+	}
+	if p.clock >= 100 || p.isInsufficientMaterial() {
+		return 0
+	}
+	if atomic.LoadInt32(&abortFlag) != 0 {
+		return 0
+	}
+
+	// Safeguard against reaching max ply limit
+	if ply >= maxPly-1 {
+		return evaluate(p)
+	}
+
+	//origAlpha := alpha
+	//bestMove := 0
+
+	inCheck := p.inCheck()
+
+	picker := &moveBuffers[ply]
+	var childPv [maxPly]int
+
+	// Stand-pat: outside of check we may decline all captures.
+	// In check we must find an evasion, so stand-pat is illegal.
+	best := -inf
+	//futilityBase := -inf
+	if !inCheck {
+		rawQEval := evaluate(p)
+		best = rawQEval + getCorrection(p)
+		if best >= beta {
+			storeTT(p.key, 0, best, LOWER, 0, ply)
+			return best
+		}
+		if best > alpha {
+			alpha = best
+		}
+		//futilityBase = best + qsFpMargin
+		initMovePicker(p, picker, 0, ply)
+	} else {
+		initMovePicker(p, picker, 0, ply)
+	}
+
+	movesTried := 0
+	for {
+		var move int
+		if inCheck {
+			move, _ = picker.nextMove()
+			if move == 0 {
+				break
+			}
+		} else {
+			move, _ = picker.nextCaptureOrCheck()
+			if move == 0 {
+				break
+			}
+
+			/*
+			if isBadCapture(p, move) {
+				continue
+			}
+
+			futility := futilityBase
+			if moveType(move) == EP_CAP {
+				futility += pieceValue[P]
+			} else if p.board[moveTo(move)] != NO_PC {
+				futility += pieceValue[p.typeAt(moveTo(move))]
+			}
+			if isProm(move) {
+				futility += pieceValue[promType(move)] - pieceValue[P]
+			}
+			if futility <= alpha {
+				best = max(best, futility)
+				continue
+			}*/
+				
+		} 
+
+		var u Undo
+		makeMove(p, move, &u)
+		if p.selfInCheck() {
+			unmakeMove(p, move, &u)
+			continue
+		}
+		movesTried++
+		// QS LMP: cap captures tried outside of check to prevent explosion
+		// in pathological positions with many equal-value captures.
+		// Commented: only uncomment when testing positions like: 1b2kBbK/2BbB1B1/2B2bb1/B2b4/bbb1b3/BBb2BBB/BB3b2/BB1bb2b w - - 0 1
+		// if !inCheck && movesTried > qsLmpLimit {
+		// 	unmakeMove(p, move, &u)
+		// 	break
+		// }
+		score := -quiesce(p, ply+1, -beta, -alpha, childPv[:])
+		unmakeMove(p, move, &u)
+
+		if atomic.LoadInt32(&abortFlag) != 0 {
+			return 0
+		}
+		if score >= beta {
+			//storeTT(p.key, move, score, LOWER, 0, ply)
+			return score
+		}
+		if score > best {
+			best = score
+			//bestMove = move
+			if score > alpha {
+				alpha = score
+				buildPV(pv, childPv[:], move)
+			}
+		}
+	}
+
+	// In check with no legal evasion: checkmate.
+	if inCheck && movesTried == 0 {
+		return -mate + ply
+	}
+
+	return best
+}
+
 // quiesce searches captures (and, when in check, all moves) until the
 // position is quiet, then returns the static evaluation.  This prevents
 // the "horizon effect" where the engine ignores an imminent capture at

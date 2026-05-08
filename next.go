@@ -201,6 +201,72 @@ startPhase:
 	return 0, StageDone
 }
 
+func (m *MovePicker) nextCaptureOrCheck() (int, MoveGenStage) {
+startPhase:
+	switch m.phase {
+	case StageTTMove:
+		move := m.ttMove
+		m.phase = StageGenCaptures
+		if move != 0 && isLegal(m.p, move) {
+			return move, StageTTMove
+		}
+		goto startPhase
+
+	case StageGenCaptures:
+		m.end = genCaptures(m.p, m.move[:])
+		m.cur = 0
+		m.badCount = 0
+		scoreCaptures(m)
+		m.phase = StageGoodCaptures
+		goto startPhase
+
+	case StageGoodCaptures:
+		for m.cur < m.end {
+			move := m.pickBest()
+			if move == m.ttMove {
+				continue
+			}
+			if isBadCapture(m.p, move) {
+				m.badCaps[m.badCount] = move
+				m.badCount++
+				continue
+			}
+			return move, StageGoodCaptures
+		}
+		m.phase = StageGenQuiet
+		goto startPhase
+
+	case StageGenQuiet:
+		m.end = genChecks(m.p, m.move[:])
+		m.cur = 0
+		scoreQuiet(m)
+		m.phase = StageQuiet
+		goto startPhase
+
+	case StageQuiet:
+		for m.cur < m.end {
+			move := m.pickBest()
+			if move == m.ttMove || move == m.killer1 || move == m.killer2 {
+				continue
+			}
+			return move, StageQuiet
+		}
+		m.badCur = 0
+		m.phase = StageBadCaptures
+		goto startPhase
+
+	case StageBadCaptures:
+		if m.badCur < m.badCount {
+			move := m.badCaps[m.badCur]
+			m.badCur++
+			return move, StageBadCaptures
+		}
+	}
+
+	m.phase = StageDone
+	return 0, StageDone
+}
+
 // ---- Capture-only picker for quiescence search ----
 
 // initQSearch prepares m to iterate only over captures, for use in
