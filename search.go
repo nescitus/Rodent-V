@@ -264,6 +264,15 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	isPv := (beta > alpha+1)
 	movesTried := 0
 
+	// --- Transposition table probe ---
+	ttFlag := 0
+	ttDepth := 0
+	if probeTT(p.key, &ttMove, &score, &ttFlag, &ttDepth, alpha, beta, depth, ply) {
+		if !isPv {
+			return score
+		}
+	}
+
 	// Safeguard against hitting max ply limit
 	if ply >= maxPly-1 {
 		return evaluate(p)
@@ -308,9 +317,9 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		}
 
 		// Skip the move excluded during a singular extension search.
-		if move == excludedMove[ply] {
-			continue
-		}
+		// if move == excludedMove[ply] {
+		// continue
+		// }
 
 		extension := 0
 
@@ -374,10 +383,9 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 			//if isQuiet(p, move) {
 			//	updateHistory(p, move, depth, ply, quietsMade[:quietsMadeCount])
 			//}
-			if excludedMove[ply] == 0 {
-				storeTT(p.key, move, score, LOWER, depth, ply)
-			}
-
+			// if excludedMove[ply] == 0 {
+			storeTT(p.key, move, score, LOWER, depth, ply)
+			// }
 			return score
 		}
 
@@ -406,9 +414,9 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	if bestScore == -inf {
 		// In a singular extension sub-search the excluded move may have been
 		// the only legal move; that's not checkmate or stalemate, just failure.
-		if excludedMove[ply] != 0 {
-			return alpha
-		}
+		// if excludedMove[ply] != 0 {
+		// return alpha
+		// }
 		if p.inCheck() {
 			return -mate + ply // checkmate: prefer shorter mates
 		}
@@ -424,18 +432,18 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	// Store the result in the TT with the appropriate bound type.
 	// Skip during singular extension sub-searches: their partial results
 	// (with one move excluded) must not corrupt the main TT entries.
-	//bound := UPPER
-	if excludedMove[ply] == 0 {
-		if bestScore > origAlpha {
-			//bound = EXACT
-			if isQuiet(p, bestMove) {
-				//	updateHistory(p, bestMove, depth, ply, nil)
-			}
-			//storeTT(p.key, bestMove, bestScore, EXACT, depth, ply)
-		} else {
-			//storeTT(p.key, 0, bestScore, UPPER, depth, ply)
+	// bound := UPPER
+	// if excludedMove[ply] == 0 {
+	if bestScore > origAlpha {
+		// bound = EXACT
+		if isQuiet(p, bestMove) {
+			//	updateHistory(p, bestMove, depth, ply, nil)
 		}
+		storeTT(p.key, bestMove, bestScore, EXACT, depth, ply)
+	} else {
+		storeTT(p.key, 0, bestScore, UPPER, depth, ply)
 	}
+	// }
 
 	return bestScore
 }
@@ -508,18 +516,25 @@ func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 				break
 			}
 
-			givesCheck := moveGivesCheck(p, move)
-
-			if !givesCheck {
+			/*
 				if isBadCapture(p, move) {
 					continue
 				}
 
-				// Prune non-queen promotions in QS.
-				if isProm(move) && moveType(move) != Q_PROM {
-					continue
+				futility := futilityBase
+				if moveType(move) == EP_CAP {
+					futility += pieceValue[P]
+				} else if p.board[moveTo(move)] != NO_PC {
+					futility += pieceValue[p.typeAt(moveTo(move))]
 				}
-			}
+				if isProm(move) {
+					futility += pieceValue[promType(move)] - pieceValue[P]
+				}
+				if futility <= alpha {
+					best = max(best, futility)
+					continue
+				}*/
+
 		}
 
 		var u Undo
