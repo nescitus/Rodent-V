@@ -232,7 +232,7 @@ func think(p *Pos, maxDepth int) {
 // Returns the score for the side to move (negamax convention).
 func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	if depth <= 0 {
-		return quiesce(p, ply, alpha, beta, pv)
+		return quiesceCheck(p, ply, alpha, beta, pv)
 	}
 
 	nodes++
@@ -479,7 +479,6 @@ func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 	// Stand-pat: outside of check we may decline all captures.
 	// In check we must find an evasion, so stand-pat is illegal.
 	best := -inf
-	//futilityBase := -inf
 	if !inCheck {
 		rawQEval := evaluate(p)
 		best = rawQEval + getCorrection(p)
@@ -490,7 +489,6 @@ func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 		if best > alpha {
 			alpha = best
 		}
-		//futilityBase = best + qsFpMargin
 		initMovePicker(p, picker, 0, ply)
 	} else {
 		initMovePicker(p, picker, 0, ply)
@@ -510,26 +508,19 @@ func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 				break
 			}
 
-			/*
-			if isBadCapture(p, move) {
-				continue
-			}
+			givesCheck := moveGivesCheck(p, move)
 
-			futility := futilityBase
-			if moveType(move) == EP_CAP {
-				futility += pieceValue[P]
-			} else if p.board[moveTo(move)] != NO_PC {
-				futility += pieceValue[p.typeAt(moveTo(move))]
+			if !givesCheck {
+				if isBadCapture(p, move) {
+					continue
+				}
+
+				// Prune non-queen promotions in QS.
+				if isProm(move) && moveType(move) != Q_PROM {
+					continue
+				}
 			}
-			if isProm(move) {
-				futility += pieceValue[promType(move)] - pieceValue[P]
-			}
-			if futility <= alpha {
-				best = max(best, futility)
-				continue
-			}*/
-				
-		} 
+		}
 
 		var u Undo
 		makeMove(p, move, &u)
