@@ -326,6 +326,24 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		evalStack[ply] = noEval
 	}
 
+	// --- Reverse futility pruning ---
+	// If the static eval beats beta by a depth-scaled margin, the position
+	// is already so good that a full search is unlikely to fall below beta.
+	// The mate guard prevents pruning when beta is a mate score, where the
+	// static eval is unreliable.  We return the margin-adjusted value rather
+	// than the raw static eval to avoid inflating the returned score.
+
+	// Use a tighter margin when improving (position is gaining ground).
+	// Wider margin when not improving avoids over-pruning a deteriorating line.
+	rfpDepthMargin := rfpMargin
+	// if improving {
+	// 	rfpDepthMargin = rfpImpMargin
+	// }
+	if !isPv && !nodeInCheck && depth <= 8 && beta < mate-maxPly &&
+		staticEval-rfpDepthMargin*depth >= beta {
+		return staticEval - rfpDepthMargin*depth
+	}
+
 	var bestMove int
 	origAlpha := alpha
 

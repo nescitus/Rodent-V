@@ -119,7 +119,7 @@ const (
 	inf               = 32767    // larger than any real score; used as +/-inf
 	mate              = 32000    // base value of checkmate score
 	maxEval           = 29999    // largest returned by evaluate(); mate scores exceed this
-	rfpMargin         = 100      // centipawns per depth for reverse futility pruning (not improving)
+	rfpMargin         = 80       // centipawns per depth for reverse futility pruning (not improving)
 	rfpImpMargin      = 60       // centipawns per depth for reverse futility pruning (improving)
 	noEval            = -inf - 1 // sentinel: no static eval stored for this ply (in check)
 	fpMargin          = 120      // centipawns per depth for main-search move-loop futility pruning
