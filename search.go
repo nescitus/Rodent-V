@@ -338,7 +338,7 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	quietTried := 0
 	// quietsMade tracks quiet moves that were fully searched without causing
 	// a beta cutoff.  On a cutoff we apply a malus to all of them.
-	//var quietsMade [maxMoves]int
+	var quietsMade [maxMoves]int
 	quietsMadeCount := 0
 
 	for {
@@ -411,9 +411,9 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		// to every quiet that was searched before this one — they failed to
 		// cut off and should be tried later in future sibling nodes.
 		if score >= beta {
-			//if isQuiet(p, move) {
-			//	updateHistory(p, move, depth, ply, quietsMade[:quietsMadeCount])
-			//}
+			if isQuiet(p, move) {
+				updateHistory(p, move, depth, ply, quietsMade[:quietsMadeCount])
+			}
 			// if excludedMove[ply] == 0 {
 			storeTT(p.key, move, score, LOWER, depth, ply)
 			// }
@@ -423,7 +423,7 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		// Record this quiet as searched-but-failed so we can penalise it
 		// if a later move causes a cutoff.
 		if stage == StageQuiet && quietsMadeCount < maxMoves {
-			//quietsMade[quietsMadeCount] = move
+			quietsMade[quietsMadeCount] = move
 			quietsMadeCount++
 		}
 
@@ -463,9 +463,8 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	// bound := UPPER
 	// if excludedMove[ply] == 0 {
 	if bestScore > origAlpha {
-		// bound = EXACT
 		if isQuiet(p, bestMove) {
-			//	updateHistory(p, bestMove, depth, ply, nil)
+			updateHistory(p, bestMove, depth, ply, nil)
 		}
 		storeTT(p.key, bestMove, bestScore, EXACT, depth, ply)
 	} else {
