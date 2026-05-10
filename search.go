@@ -180,7 +180,7 @@ func think(p *Pos, maxDepth int) {
 	contValid = [maxPly]bool{} // reset cont hist context; stale entries from prev search must not be used
 
 	var pv [maxPly]int
-	//score := 0
+	score := 0
 
 	for rootDepth = 1; rootDepth <= maxDepth; rootDepth++ {
 		// Before starting a new depth, do an unthrottled time check.
@@ -196,13 +196,42 @@ func think(p *Pos, maxDepth int) {
 				break
 			}
 		}
+		var iterScore int
 
-		//var iterScore int
-		search(p, 0, -inf, inf, rootDepth, false, pv[:])
+		if rootDepth < 5 {
+			// Aspiration windows are unreliable at shallow depths.
+			iterScore = search(p, 0, -inf, inf, rootDepth, false, pv[:])
+		} else {
+			// Score-adaptive initial delta: balanced positions get a tight
+			// window; large scores widen it to reduce retry churn.
+			delta := 25 + score*score/16384
+			alpha := max(-inf, score-delta)
+			beta := min(inf, score+delta)
+
+			for {
+				iterScore = search(p, 0, alpha, beta, rootDepth, false, pv[:])
+				if atomic.LoadInt32(&abortFlag) != 0 {
+					break
+				}
+				if iterScore <= alpha {
+					// Fail low: collapse beta to the midpoint before widening
+					// alpha so the high side doesn't grow unnecessarily.
+					beta = (alpha + beta) / 2
+					alpha = max(-inf, alpha-delta)
+				} else if iterScore >= beta {
+					// Fail high: widen the window above and retry.
+					beta = min(inf, beta+delta)
+				} else {
+					break // score is inside the window
+				}
+				delta += delta / 2 // proportional widening (×1.5)
+			}
+		}
+
 		if atomic.LoadInt32(&abortFlag) != 0 {
 			break
 		}
-		//score = iterScore
+		score = iterScore
 	}
 
 	if pv[0] != 0 {
