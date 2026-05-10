@@ -282,8 +282,10 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 
 	if !isRoot {
 		pv[0] = 0
-		// A position repeated from earlier in the game tree is a draw.
-		if isRepetition(p) || p.isInsufficientMaterial() {
+		// Check all draw conditions before generating any moves so that
+		// pv[0] == 0 is guaranteed when we return, preventing the PV from
+		// extending past a drawing position.
+		if isRepetition(p) || p.isInsufficientMaterial() || p.clock >= 100 {
 			checkTime() // sets abort flag - helps in case of many draws in a row
 			return 0
 		}
@@ -452,11 +454,8 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		return 0 // stalemate
 	}
 
-	// 50-move rule: only reached when there are legal moves, so checkmate
-	// and stalemate have already been handled above and take priority.
-	if !isRoot && p.clock >= 100 {
-		return 0
-	}
+	// Note: the 50-move draw (p.clock >= 100) is now handled at the top of
+	// this function alongside repetition detection, so it never reaches here.
 
 	// Store the result in the TT with the appropriate bound type.
 	// Skip during singular extension sub-searches: their partial results
