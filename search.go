@@ -439,9 +439,12 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// Late move reduction
 		isReduced := false
-		if stage == StageQuiet && depth > 2 && !nodeInCheck && !givesCheck && movesTried >= 4 && !isPv {
-			reduction := 1
+		if stage == StageQuiet && depth > 2 && !nodeInCheck && !givesCheck && movesTried >= 4 {
+			reduction := lmr[min(depth, 63)][min(movesTried, 63)]
 			if reduction > 0 {
+				if !isPv {
+					reduction++
+				}
 
 				if reduction > newDepth-1 {
 					reduction = newDepth - 1
