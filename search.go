@@ -102,26 +102,19 @@ package main
 import (
 	"fmt"
 	"math"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-// Global search state.
+// Global search state — shared across all threads.
+// Per-thread state lives in SearchState (see thread.go).
 var (
-	timeLimit    int64        // allocated move time in ms (-1 = unlimited)
-	pondering    bool         // true while in ponder mode (ignore clock)
-	rootDepth    int          // current iterative deepening depth
-	selDepth     int          // maximum ply reached in the current search
-	nodes        int64        // total nodes searched (search-goroutine only; no atomic needed)
-	abortFlag    int32        // set to 1 atomically to stop the search
-	searchStart  int64        // Unix ms at the start of think()
-	rootHistLen  int          // p.histLen at the moment think() began; used by repetition detection
-	evalStack    [maxPly]int  // static eval at each ply; noEval sentinel when in check
-	contSide     [maxPly]int  // side that made the move at this ply (for cont hist)
-	contPiece    [maxPly]int  // piece type (0-5) that moved at this ply
-	contTo       [maxPly]int  // destination square at this ply
-	contValid    [maxPly]bool // false for null moves and unvisited plies
-	excludedMove [maxPly]int  // move excluded during singular extension search (0 = none)
+	timeLimit  int64     // allocated move time in ms (-1 = unlimited); set by UCI
+	pondering  bool      // true while in ponder mode (ignore clock)
+	rootDepth  int       // current iterative deepening depth (main thread drives)
+	abortFlag  int32     // set to 1 atomically to stop all threads
+	numThreads int   = 1 // number of search threads (1 = single-threaded)
 )
 
 // lmr[depth][moveIndex] holds the ply reduction for a quiet move tried
@@ -169,15 +162,31 @@ func initLMRTable() {
 // On fail-low beta is first collapsed to the midpoint before alpha widens,
 // avoiding a needlessly large high-side window.  The delta grows by 50% on
 // each failure (smoother than doubling) until the window opens fully.
-func think(p *Pos, maxDepth int) {
+func think(p *Pos, states []*SearchState, maxDepth int) {
 	engineSide = p.side
 	ttDate = (ttDate + 1) & 255
-	nodes = 0
-	selDepth = 0
 	atomic.StoreInt32(&abortFlag, 0)
-	searchStart = time.Now().UnixMilli()
-	rootHistLen = p.histLen
-	contValid = [maxPly]bool{} // reset cont hist context; stale entries from prev search must not be used
+
+	ss := states[0]
+	ss.resetForSearch(p)
+
+	// Launch lazy SMP helper threads (depth 1..INF until abortFlag fires).
+	var wg sync.WaitGroup
+	for i := 1; i < numThreads && i < len(states); i++ {
+		h := states[i]
+		h.clearHistory()
+		h.resetForSearch(p)
+		h.searchStart = ss.searchStart // helpers share the same clock origin
+		pCopy := *p
+		wg.Add(1)
+		go func(hs *SearchState, pos Pos) {
+			defer wg.Done()
+			var dummyPV [maxPly]int
+			for d := 1; atomic.LoadInt32(&abortFlag) == 0; d++ {
+				hs.search(&pos, 0, -inf, inf, d, false, dummyPV[:])
+			}
+		}(h, pCopy)
+	}
 
 	var pv [maxPly]int
 	score := 0
@@ -191,7 +200,7 @@ func think(p *Pos, maxDepth int) {
 		//      starting it when half the budget is gone almost always busts
 		//      the limit. This is the key guard against time forfeits.
 		if rootDepth > 1 && !pondering && timeLimit >= 0 {
-			elapsed := time.Now().UnixMilli() - searchStart
+			elapsed := time.Now().UnixMilli() - ss.searchStart
 			if elapsed >= timeLimit || elapsed >= timeLimit/2 {
 				break
 			}
@@ -200,7 +209,7 @@ func think(p *Pos, maxDepth int) {
 
 		if rootDepth < 5 {
 			// Aspiration windows are unreliable at shallow depths.
-			iterScore = search(p, 0, -inf, inf, rootDepth, false, pv[:])
+			iterScore = ss.search(p, 0, -inf, inf, rootDepth, false, pv[:])
 		} else {
 			// Score-adaptive initial delta: balanced positions get a tight
 			// window; large scores widen it to reduce retry churn.
@@ -209,7 +218,7 @@ func think(p *Pos, maxDepth int) {
 			beta := min(inf, score+delta)
 
 			for {
-				iterScore = search(p, 0, alpha, beta, rootDepth, false, pv[:])
+				iterScore = ss.search(p, 0, alpha, beta, rootDepth, false, pv[:])
 				if atomic.LoadInt32(&abortFlag) != 0 {
 					break
 				}
@@ -233,6 +242,10 @@ func think(p *Pos, maxDepth int) {
 		}
 		score = iterScore
 	}
+
+	// Stop all helpers and wait for them to exit.
+	atomic.StoreInt32(&abortFlag, 1)
+	wg.Wait()
 
 	if pv[0] != 0 {
 		best := moveToStr(pv[0])
@@ -259,16 +272,16 @@ func think(p *Pos, maxDepth int) {
 //	pv: principal variation output buffer
 //
 // Returns the score for the side to move (negamax convention).
-func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
+func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	if depth <= 0 {
-		return quiesceCheck(p, ply, alpha, beta, pv)
+		return ss.quiesceCheck(p, ply, alpha, beta, pv)
 	}
 
-	nodes++
-	if ply > selDepth {
-		selDepth = ply
+	ss.nodes++
+	if ply > ss.selDepth {
+		ss.selDepth = ply
 	}
-	checkTime()
+	ss.checkTime()
 	if atomic.LoadInt32(&abortFlag) != 0 {
 		return 0
 	}
@@ -285,8 +298,8 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		// Check all draw conditions before generating any moves so that
 		// pv[0] == 0 is guaranteed when we return, preventing the PV from
 		// extending past a drawing position.
-		if isRepetition(p) || p.isInsufficientMaterial() || p.clock >= 100 {
-			checkTime() // sets abort flag - helps in case of many draws in a row
+		if ss.isRepetition(p) || p.isInsufficientMaterial() || p.clock >= 100 {
+			ss.checkTime() // sets abort flag - helps in case of many draws in a row
 			return 0
 		}
 	}
@@ -319,11 +332,11 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	rawEval := 0
 	if !nodeInCheck {
 		rawEval = evaluate(p)
-		correction := getCorrection(p)
+		correction := ss.getCorrection(p)
 		staticEval = rawEval + correction
-		evalStack[ply] = staticEval
+		ss.evalStack[ply] = staticEval
 	} else {
-		evalStack[ply] = noEval
+		ss.evalStack[ply] = noEval
 	}
 
 	// --- Reverse futility pruning ---
@@ -349,12 +362,12 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	// is already beyond beta, we are in check, or only pawns remain.
 	// Reduction = base + depth/depthDiv + min((eval-beta)/evalDiv, maxEvalBonus).
 	if depth > 1 && !isPv && !nodeInCheck && !wasNull && p.canNullMove() && beta <= staticEval {
-		contValid[ply] = false // null move: no valid piece context for cont hist
+		ss.contValid[ply] = false // null move: no valid piece context for cont hist
 		reduction := nmpBaseReduction + depth/nmpDepthReduction
 		var u Undo
 		makeNullMove(p, &u)
 		var nullPv [maxPly]int
-		score = -search(p, ply+1, -beta, -beta+1, depth-1-reduction, true, nullPv[:])
+		score = -ss.search(p, ply+1, -beta, -beta+1, depth-1-reduction, true, nullPv[:])
 		unmakeNullMove(p, &u)
 		if atomic.LoadInt32(&abortFlag) != 0 {
 			return 0
@@ -370,8 +383,8 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 
 	// --- Main move loop ---
 	bestScore := -inf
-	picker := &moveBuffers[ply]
-	initMovePicker(p, picker, ttMove, ply)
+	picker := &ss.moveBuffers[ply]
+	initMovePicker(p, picker, ss, ttMove, ply)
 	var childPv [maxPly]int
 
 	quietTried := 0
@@ -407,10 +420,10 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		// Record this move in the cont hist context stack so child nodes
 		// can look it up as their "1-ply back" context.
 		// p.side has flipped after makeMove, so the mover was p.side^1.
-		contSide[ply] = p.side ^ 1
-		contPiece[ply] = movedPiece
-		contTo[ply] = moveTo(move)
-		contValid[ply] = true
+		ss.contSide[ply] = p.side ^ 1
+		ss.contPiece[ply] = movedPiece
+		ss.contTo[ply] = moveTo(move)
+		ss.contValid[ply] = true
 
 		givesCheck := p.inCheck()
 
@@ -430,11 +443,11 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		// to quickly prove they are worse than the PV. If a move fails high,
 		// we re-search it with the full window to find its true value.
 		if movesTried == 0 {
-			score = -search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
+			score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
 		} else {
-			score = -search(p, ply+1, -alpha-1, -alpha, newDepth, false, childPv[:])
+			score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth, false, childPv[:])
 			if score > alpha && isPv {
-				score = -search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
+				score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
 			}
 		}
 
@@ -451,11 +464,9 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 		// cut off and should be tried later in future sibling nodes.
 		if score >= beta {
 			if isQuiet(p, move) {
-				updateHistory(p, move, depth, ply, quietsMade[:quietsMadeCount])
+				ss.updateHistory(p, move, depth, ply, quietsMade[:quietsMadeCount])
 			}
-			// if excludedMove[ply] == 0 {
 			storeTT(p.key, move, score, LOWER, depth, ply)
-			// }
 			return score
 		}
 
@@ -471,10 +482,9 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 			bestMove = move
 			if score > alpha {
 				alpha = score
-				//bestMove = move
 				buildPV(pv, childPv[:], move)
 				if isRoot {
-					reportInfo(score, pv)
+					ss.reportInfo(score, pv)
 				}
 			}
 		}
@@ -503,7 +513,7 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	// if excludedMove[ply] == 0 {
 	if bestScore > origAlpha {
 		if isQuiet(p, bestMove) {
-			updateHistory(p, bestMove, depth, ply, nil)
+			ss.updateHistory(p, bestMove, depth, ply, nil)
 		}
 		storeTT(p.key, bestMove, bestScore, EXACT, depth, ply)
 	} else {
@@ -514,48 +524,38 @@ func search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
 	return bestScore
 }
 
-func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
-	nodes++
-	if ply > selDepth {
-		selDepth = ply
+func (ss *SearchState) quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
+	ss.nodes++
+	if ply > ss.selDepth {
+		ss.selDepth = ply
 	}
-	checkTime()
+	ss.checkTime()
 	if atomic.LoadInt32(&abortFlag) != 0 {
 		return 0
 	}
 
 	pv[0] = 0
 
-	// Repetition detection
-	if isRepetition(p) {
+	if ss.isRepetition(p) {
 		return 0
 	}
 	if p.clock >= 100 || p.isInsufficientMaterial() {
 		return 0
 	}
-	if atomic.LoadInt32(&abortFlag) != 0 {
-		return 0
-	}
 
-	// Safeguard against reaching max ply limit
 	if ply >= maxPly-1 {
 		return evaluate(p)
 	}
 
-	//origAlpha := alpha
-	//bestMove := 0
-
 	inCheck := p.inCheck()
 
-	picker := &moveBuffers[ply]
+	picker := &ss.moveBuffers[ply]
 	var childPv [maxPly]int
 
-	// Stand-pat: outside of check we may decline all captures.
-	// In check we must find an evasion, so stand-pat is illegal.
 	best := -inf
 	if !inCheck {
 		rawQEval := evaluate(p)
-		best = rawQEval + getCorrection(p)
+		best = rawQEval + ss.getCorrection(p)
 		if best >= beta {
 			storeTT(p.key, 0, best, LOWER, 0, ply)
 			return best
@@ -563,9 +563,9 @@ func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 		if best > alpha {
 			alpha = best
 		}
-		initMovePicker(p, picker, 0, ply)
+		initMovePicker(p, picker, ss, 0, ply)
 	} else {
-		initMovePicker(p, picker, 0, ply)
+		initMovePicker(p, picker, ss, 0, ply)
 	}
 
 	movesTried := 0
@@ -581,26 +581,6 @@ func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 			if move == 0 {
 				break
 			}
-
-			/*
-				if isBadCapture(p, move) {
-					continue
-				}
-
-				futility := futilityBase
-				if moveType(move) == EP_CAP {
-					futility += pieceValue[P]
-				} else if p.board[moveTo(move)] != NO_PC {
-					futility += pieceValue[p.typeAt(moveTo(move))]
-				}
-				if isProm(move) {
-					futility += pieceValue[promType(move)] - pieceValue[P]
-				}
-				if futility <= alpha {
-					best = max(best, futility)
-					continue
-				}*/
-
 		}
 
 		var u Undo
@@ -610,26 +590,17 @@ func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 			continue
 		}
 		movesTried++
-		// QS LMP: cap captures tried outside of check to prevent explosion
-		// in pathological positions with many equal-value captures.
-		// Commented: only uncomment when testing positions like: 1b2kBbK/2BbB1B1/2B2bb1/B2b4/bbb1b3/BBb2BBB/BB3b2/BB1bb2b w - - 0 1
-		// if !inCheck && movesTried > qsLmpLimit {
-		// 	unmakeMove(p, move, &u)
-		// 	break
-		// }
-		score := -quiesce(p, ply+1, -beta, -alpha, childPv[:])
+		score := -ss.quiesce(p, ply+1, -beta, -alpha, childPv[:])
 		unmakeMove(p, move, &u)
 
 		if atomic.LoadInt32(&abortFlag) != 0 {
 			return 0
 		}
 		if score >= beta {
-			//storeTT(p.key, move, score, LOWER, 0, ply)
 			return score
 		}
 		if score > best {
 			best = score
-			//bestMove = move
 			if score > alpha {
 				alpha = score
 				buildPV(pv, childPv[:], move)
@@ -637,11 +608,9 @@ func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 		}
 	}
 
-	// In check with no legal evasion: checkmate.
 	if inCheck && movesTried == 0 {
 		return -mate + ply
 	}
-
 	return best
 }
 
@@ -654,26 +623,22 @@ func quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 // must be found.  We fall through to the full move pipeline so that
 // quiet evasions are included.  If no legal move exists we return a
 // checkmate score.  Outside of check the standard stand-pat applies.
-func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
-	nodes++
-	if ply > selDepth {
-		selDepth = ply
+func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
+	ss.nodes++
+	if ply > ss.selDepth {
+		ss.selDepth = ply
 	}
-	checkTime()
+	ss.checkTime()
 	if atomic.LoadInt32(&abortFlag) != 0 {
 		return 0
 	}
 
 	pv[0] = 0
 
-	// Repetition detection
-	if isRepetition(p) {
+	if ss.isRepetition(p) {
 		return 0
 	}
 	if p.clock >= 100 || p.isInsufficientMaterial() {
-		return 0
-	}
-	if atomic.LoadInt32(&abortFlag) != 0 {
 		return 0
 	}
 
@@ -682,12 +647,8 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		return evaluate(p)
 	}
 
-	//origAlpha := alpha
-	//bestMove := 0
-
 	inCheck := p.inCheck()
-
-	picker := &moveBuffers[ply]
+	picker := &ss.moveBuffers[ply]
 	var childPv [maxPly]int
 
 	// Stand-pat: outside of check we may decline all captures.
@@ -695,7 +656,7 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 	best := -inf
 	if !inCheck {
 		rawQEval := evaluate(p)
-		best = rawQEval + getCorrection(p)
+		best = rawQEval + ss.getCorrection(p)
 		if best >= beta {
 			storeTT(p.key, 0, best, LOWER, 0, ply)
 			return best
@@ -705,7 +666,7 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		}
 		initQSearch(p, picker)
 	} else {
-		initMovePicker(p, picker, 0, ply)
+		initMovePicker(p, picker, ss, 0, ply)
 	}
 
 	movesTried := 0
@@ -768,19 +729,17 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		// 	unmakeMove(p, move, &u)
 		// 	break
 		// }
-		score := -quiesce(p, ply+1, -beta, -alpha, childPv[:])
+		score := -ss.quiesce(p, ply+1, -beta, -alpha, childPv[:])
 		unmakeMove(p, move, &u)
 
 		if atomic.LoadInt32(&abortFlag) != 0 {
 			return 0
 		}
 		if score >= beta {
-			//storeTT(p.key, move, score, LOWER, 0, ply)
 			return score
 		}
 		if score > best {
 			best = score
-			//bestMove = move
 			if score > alpha {
 				alpha = score
 				buildPV(pv, childPv[:], move)
@@ -788,11 +747,9 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		}
 	}
 
-	// In check with no legal evasion: checkmate.
 	if inCheck && movesTried == 0 {
 		return -mate + ply
 	}
-
 	return best
 }
 
@@ -810,7 +767,7 @@ func quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 //
 // We step back in increments of 2 (same side to move) and stop at the
 // 50-move clock boundary, since repetitions cannot cross an irreversible move.
-func isRepetition(p *Pos) bool {
+func (ss *SearchState) isRepetition(p *Pos) bool {
 	reps := 0
 	for i := 4; i <= p.clock; i += 2 {
 		idx := p.histLen - i
@@ -820,7 +777,7 @@ func isRepetition(p *Pos) bool {
 		if p.key != p.keyHist[idx] {
 			continue
 		}
-		if idx >= rootHistLen {
+		if idx >= ss.rootHistLen {
 			return true // in-tree: one occurrence is enough
 		}
 		reps++
@@ -833,7 +790,7 @@ func isRepetition(p *Pos) bool {
 
 // reportInfo outputs a UCI "info" line for the current iteration.
 // Mate scores are converted to "moves to mate" format.
-func reportInfo(score int, pv []int) {
+func (ss *SearchState) reportInfo(score int, pv []int) {
 	// If we are approaching checkmate for either side, calculate
 	// distance to checkmate; in the normal scenario, switch to
 	// centipawns.
@@ -848,30 +805,30 @@ func reportInfo(score int, pv []int) {
 
 	// Set elapsed (time used so far), and guard
 	// against division by zero in nps calculation
-	elapsed := time.Now().UnixMilli() - searchStart
+	elapsed := time.Now().UnixMilli() - ss.searchStart
 	if elapsed <= 0 {
 		elapsed = 1
 	}
 
 	// Calculate nodes per second
-	nps := nodes * 1000 / elapsed
+	nps := ss.nodes * 1000 / elapsed
 
 	// Output
 	hashfull := ttHashfull()
 	fmt.Printf("info depth %d seldepth %d time %d nodes %d nps %d hashfull %d score %s %d pv %s\n",
-		rootDepth, selDepth, elapsed, nodes, nps, hashfull, scoreType, score, pvString(pv))
+		rootDepth, ss.selDepth, elapsed, ss.nodes, nps, hashfull, scoreType, score, pvString(pv))
 }
 
 // checkTime is called periodically (every 4096 nodes) to see whether
 // the allocated time has expired.  If so, it sets abortFlag so the
 // search unwinds cleanly.  Skipped during depth-1 searches (the
 // engine must always return at least one move) and when pondering.
-func checkTime() {
-	if nodes&1023 != 0 || rootDepth == 1 {
+func (ss *SearchState) checkTime() {
+	if ss.nodes&1023 != 0 || rootDepth == 1 {
 		return
 	}
 	if !pondering && timeLimit >= 0 {
-		if time.Now().UnixMilli()-searchStart >= timeLimit {
+		if time.Now().UnixMilli()-ss.searchStart >= timeLimit {
 			atomic.StoreInt32(&abortFlag, 1)
 		}
 	}
