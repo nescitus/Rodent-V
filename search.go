@@ -437,17 +437,35 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			quietTried++
 		}
 
+		// Late move reduction
+		isReduced := false
+		if stage == StageQuiet && depth > 2 && !nodeInCheck && !givesCheck && movesTried >= 4 && !isPv {
+			reduction := 1
+			if reduction > 0 {
+
+				if reduction > newDepth-1 {
+					reduction = newDepth - 1
+				}
+				score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth-reduction, false, childPv[:])
+				if score <= alpha {
+					isReduced = true
+				}
+			}
+		}
+
 		// Principal Variation Search (PVS):
 		// We assume the first move is the best and search it with a full window.
 		// For subsequent moves, we use a Null-Window Search (-alpha-1, -alpha)
 		// to quickly prove they are worse than the PV. If a move fails high,
 		// we re-search it with the full window to find its true value.
-		if movesTried == 0 {
-			score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
-		} else {
-			score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth, false, childPv[:])
-			if score > alpha && isPv {
+		if (!isReduced) {
+			if movesTried == 0 {
 				score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
+			} else {
+				score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth, false, childPv[:])
+				if score > alpha && isPv {
+					score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
+				}
 			}
 		}
 
