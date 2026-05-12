@@ -352,7 +352,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// if improving {
 	// 	rfpDepthMargin = rfpImpMargin
 	// }
-	if !isPv && !nodeInCheck && depth <= 8 && beta < mate-maxPly &&
+	if !isPv && !nodeInCheck && depth <= rfpDepth && beta < mate-maxPly && useRFP &&
 		staticEval-rfpDepthMargin*depth >= beta {
 		return staticEval - rfpDepthMargin*depth
 	}
@@ -361,7 +361,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// Skip if: depth <= 1 (too shallow to be reliable), the position
 	// is already beyond beta, we are in check, or only pawns remain.
 	// Reduction = base + depth/depthDiv + min((eval-beta)/evalDiv, maxEvalBonus).
-	if depth > 1 && !isPv && !nodeInCheck && !wasNull && p.canNullMove() && beta <= staticEval {
+	if depth > 1 && !isPv && !nodeInCheck && !wasNull && p.canNullMove() && beta <= staticEval && useNULL {
 		ss.contValid[ply] = false // null move: no valid piece context for cont hist
 		reduction := nmpBaseReduction + depth/nmpDepthReduction
 		var u Undo
@@ -439,7 +439,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// Late move reduction
 		isReduced := false
-		if stage == StageQuiet && depth > 2 && !nodeInCheck && !givesCheck && movesTried >= 4 {
+		if stage == StageQuiet && depth > 2 && !nodeInCheck && !givesCheck && movesTried >= 4 && useLMR {
 			reduction := lmr[min(depth, 63)][min(movesTried, 63)]
 			if reduction > 0 {
 				if !isPv {
