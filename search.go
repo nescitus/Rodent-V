@@ -312,10 +312,11 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	ttFlag := 0
 	ttDepth := 0
 	if probeTT(p.key, &ttMove, &score, &ttFlag, &ttDepth, alpha, beta, depth, ply) {
-		if !isPv {
+		if !isPv && ss.excludedMove[ply] == 0 {
 			return score
 		}
 	}
+	ttScore := score // save TT score before NMP/LMR overwrites the score variable
 
 	// Safeguard against hitting max ply limit
 	if ply >= maxPly-1 {
@@ -353,6 +354,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// 	rfpDepthMargin = rfpImpMargin
 	// }
 	if !isPv && !nodeInCheck && depth <= rfpDepth && beta < mate-maxPly && useRFP &&
+	    ss.excludedMove[ply] == 0 &&
 		staticEval-rfpDepthMargin*depth >= beta {
 		return staticEval - rfpDepthMargin*depth
 	}
@@ -361,7 +363,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// Skip if: depth <= 1 (too shallow to be reliable), the position
 	// is already beyond beta, we are in check, or only pawns remain.
 	// Reduction = base + depth/depthDiv + min((eval-beta)/evalDiv, maxEvalBonus).
-	if depth > 1 && !isPv && !nodeInCheck && !wasNull && p.canNullMove() && beta <= staticEval && useNULL {
+	if depth > 1 && !isPv && !nodeInCheck && !wasNull && p.canNullMove() && beta <= staticEval && useNULL && ss.excludedMove[ply] == 0 {
 		ss.contValid[ply] = false // null move: no valid piece context for cont hist
 		reduction := nmpBaseReduction + depth/nmpDepthReduction
 		var u Undo
@@ -400,11 +402,40 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		}
 
 		// Skip the move excluded during a singular extension search.
-		// if move == excludedMove[ply] {
-		// continue
-		// }
+		if move == ss.excludedMove[ply] {
+			continue
+		}
 
+		// --- Singular extension ---
+		// When the TT move is reliable and deep enough, check if it's the
+		// only good move by searching without it at reduced depth. If all
+		// other moves fail below a margin, extend this move by +1 ply.
+		// Negative extension: if the position isn't singular AND the TT
+		// score already beats beta, reduce aggressively (multi-cut signal).
 		extension := 0
+		if useSingularExt && move == ttMove &&
+			ss.excludedMove[ply] == 0 &&
+			depth >= 8 &&
+			ttDepth >= depth-3 &&
+			ttFlag != UPPER &&
+			abs(ttScore) < mate-maxPly {
+			sBeta := ttScore - seBetaMargin*depth
+			// The SE sub-search calls search(p, ply, ...) which reinitialises
+			// moveBuffers[ply], destroying the main loop's picker state.
+			// Save and restore the picker around the sub-search.
+			savedPicker := *picker
+			ss.excludedMove[ply] = move
+			var sePv [maxPly]int
+			sScore := ss.search(p, ply, sBeta-1, sBeta, (depth-1)/2, false, sePv[:])
+			ss.excludedMove[ply] = 0
+			*picker = savedPicker
+			if sScore < sBeta {
+				extension = 1
+				if useDoubleExt && !isPv && sScore < sBeta-seDoubleMargin {
+					extension = 2
+				}
+			}
+		}
 
 		// Capture piece type before makeMove — after the call the square
 		// may hold a promoted piece rather than the original pawn.
@@ -429,8 +460,23 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// Extend by one ply for moves that give check, plus singular extension.
 		newDepth := depth - 1 + extension
-		if givesCheck {
+		if givesCheck && extension == 0{
 			newDepth++
+		}
+
+		// Late move pruning: skip quiet moves beyond the threshold.
+		// Moves that give check are exempt — they may be the only defence
+		// or the only escape from a mating attack.
+		// When improving we allow more moves (position is trending up, so
+		// later moves are more likely to be relevant).
+		lmpThreshold := LMPnormalStep*depth + 1
+		//if improving {
+		//	lmpThreshold = LMPimprovingStep*depth + 1
+		//}
+		if useLMP && stage == StageQuiet && !isPv && !nodeInCheck && depth < 4 &&
+			quietTried > lmpThreshold && !givesCheck {
+			unmakeMove(p, move, &u)
+			continue
 		}
 
 		if stage == StageQuiet {
@@ -487,7 +533,9 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			if isQuiet(p, move) {
 				ss.updateHistory(p, move, depth, ply, quietsMade[:quietsMadeCount])
 			}
-			storeTT(p.key, move, score, LOWER, depth, ply)
+			if ss.excludedMove[ply] == 0 {
+				storeTT(p.key, move, score, LOWER, depth, ply)
+			}
 			return score
 		}
 
@@ -515,9 +563,9 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	if bestScore == -inf {
 		// In a singular extension sub-search the excluded move may have been
 		// the only legal move; that's not checkmate or stalemate, just failure.
-		// if excludedMove[ply] != 0 {
-		// return alpha
-		// }
+		 if ss.excludedMove[ply] != 0 {
+		 	return alpha
+		 }
 		if p.inCheck() {
 			return -mate + ply // checkmate: prefer shorter mates
 		}
@@ -530,8 +578,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// Store the result in the TT with the appropriate bound type.
 	// Skip during singular extension sub-searches: their partial results
 	// (with one move excluded) must not corrupt the main TT entries.
-	// bound := UPPER
-	// if excludedMove[ply] == 0 {
+	 //bound := UPPER
+	 if ss.excludedMove[ply] == 0 {
 	if bestScore > origAlpha {
 		if isQuiet(p, bestMove) {
 			ss.updateHistory(p, bestMove, depth, ply, nil)
@@ -540,7 +588,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	} else {
 		storeTT(p.key, 0, bestScore, UPPER, depth, ply)
 	}
-	// }
+	 }
 
 	return bestScore
 }

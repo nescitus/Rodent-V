@@ -132,12 +132,17 @@ const (
 	probcutMargin     = 120      // extra margin above beta for ProbCut verification
 	probcutMinDepth   = 6        // only apply ProbCut when enough depth remains
 	probcutReduction  = 2        // depth reduction used by the reduced verification search
+	
+	useSingularExt    = false
+	useDoubleExt      = false
 	seBetaMargin      = 6        // centipawns per ply subtracted from ttScore for singular verification
 	seDoubleMargin    = 64       // extra centipawns below singular beta needed for a double extension
+	
 	razorMargin       = 300      // centipawns per depth for razoring
 	qsFpPawnMargin    = 300      // qs futility margin when capturing a pawn (passers warrant extra slack)
 	qsFpPieceMargin   = 200      // qs futility margin when capturing a piece
 	qsLmpLimit        = 2        // max captures tried per qs node (outside check) to cap explosion
+	
 	useLMR            = true
 )
 
@@ -149,7 +154,7 @@ const (
 // only null m: info depth 21 seldepth 48 time 2297254 nodes 3418081729 nps 1487898 hashfull 1000 score cp -601 pv e3c5 d5d4 h4d4 d8a5 c5d6 f8d8 g3d3 b7c6 h2h3 h7h5 d3d2 a8c8 d2d1 a5b6 d1d3 b6b7 e1d2 a6a5 d2c1 c6f3 c1b1
 // null + lmr : info depth 19 seldepth 39 time 28132 nodes 42555060 nps 1512692 hashfull 1000 score mate 8 pv h4h7 g8h7 g3h3 h7g8 e3h6 d8c7 f2f4 c7a5 h6g7 a5a1 e1d2 a1c1 d2c1 a8c8 h3h8
 // changed par: info depth 22 seldepth 46 time 67631 nodes 109972506 nps 1626066 hashfull 1000 score mate 8 pv h4h7 g8h7 g3h3 h7g8 e3h6 d
-
+// sing ext 1 : info depth 21 seldepth 59 time 62623 nodes 94051741 nps 1501872 hashfull 1000 score mate 8 pv h4h7 g8h7 g3h3 h7g8 e3h6 d8c7 f2f4 c7a5 h6g7 a5a1 e1d2 a1c1 d2c1 d5d4 h3h8
 
 // startFEN is the standard opening position in FEN notation.
 // sideKey is XORed into the Zobrist hash whenever Black is to move.
