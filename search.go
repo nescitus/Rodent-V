@@ -353,10 +353,23 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// if improving {
 	// 	rfpDepthMargin = rfpImpMargin
 	// }
-	if !isPv && !nodeInCheck && depth <= rfpDepth && beta < mate-maxPly && useRFP &&
+	if !useRFP && isPv && !nodeInCheck && depth <= rfpDepth && beta < mate-maxPly && 
 	    ss.excludedMove[ply] == 0 &&
 		staticEval-rfpDepthMargin*depth >= beta {
 		return staticEval - rfpDepthMargin*depth
+	}
+
+		// --- Razoring ---
+	// If static eval is far below alpha at shallow depth, the position is
+	// unlikely to improve enough with quiet moves. Drop into qsearch; if
+	// qsearch also fails low, return immediately without searching further.
+	if useRazoring && !isPv && !nodeInCheck && !wasNull && depth <= maxRazorDepth &&
+		ss.excludedMove[ply] == 0 &&
+		staticEval <= alpha-razorMargin*depth { // try 200 + 60 * depth
+		s := ss.quiesceCheck(p, ply, alpha, beta, pv)
+		if s <= alpha {
+			return s
+		}
 	}
 
 	// --- Null-move pruning ---
@@ -378,6 +391,56 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		if score >= beta {
 			return score
 		}
+	}
+
+		// --- ProbCut ---
+	// If a tactical move already exceeds beta by a safety margin at reduced
+	// depth, assume the full node will also fail high and prune the rest.
+	if useProbcut && !isPv && !nodeInCheck && depth >= probcutMinDepth && beta < mate-maxPly &&
+		ss.excludedMove[ply] == 0 {
+		probcutBeta := min(beta+probcutMargin, mate-maxPly)
+		probcutDepth := depth - 1 - probcutReduction
+		probcutPicker := &ss.moveBuffers[ply]
+		initQSearch(p, probcutPicker)
+		var probcutPv [maxPly]int
+
+		for {
+			move := probcutPicker.nextCapture()
+			if move == 0 {
+				break
+			}
+			if isBadCapture(p, move) {
+				continue
+			}
+
+			var u Undo
+			makeMove(p, move, &u)
+			if p.selfInCheck() {
+				unmakeMove(p, move, &u)
+				continue
+			}
+
+			score = -ss.quiesceCheck(p, ply+1, -probcutBeta, -probcutBeta+1, probcutPv[:])
+			if score >= probcutBeta && probcutDepth > 0 {
+				score = -ss.search(p, ply+1, -probcutBeta, -probcutBeta+1, probcutDepth, false, probcutPv[:])
+			}
+			unmakeMove(p, move, &u)
+
+			if atomic.LoadInt32(&abortFlag) != 0 {
+				return 0
+			}
+			if score >= probcutBeta {
+				return score
+			}
+		}
+	}
+
+	// --- Internal iterative reduction ---
+	// Without a TT move the move picker has no good hint; search one
+	// ply shallower so the cost of poor ordering is contained.
+	// Skipped in check: evasions must be searched at full depth.
+	if useIIR && ttMove == 0 && depth >= IIRmaxDepth && !nodeInCheck {
+		depth--
 	}
 
 	var bestMove int
@@ -479,6 +542,15 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			continue
 		}
 
+		// Futility pruning: at shallow depth, skip late quiet moves that
+		// cannot plausibly raise alpha even with a generous margin.
+		if useFutility && stage == StageQuiet && !isPv && !nodeInCheck && !givesCheck &&
+			ss.excludedMove[ply] == 0 && depth <= fpMaxDepth &&
+			quietTried > 0 && alpha < mate-maxPly &&
+			staticEval+fpMargin*depth <= alpha {
+			unmakeMove(p, move, &u)
+			continue
+		}
 		if stage == StageQuiet {
 			quietTried++
 		}
