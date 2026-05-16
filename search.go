@@ -353,13 +353,13 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// if improving {
 	// 	rfpDepthMargin = rfpImpMargin
 	// }
-	if !useRFP && isPv && !nodeInCheck && depth <= rfpDepth && beta < mate-maxPly && 
-	    ss.excludedMove[ply] == 0 &&
+	if !useRFP && isPv && !nodeInCheck && depth <= rfpDepth && beta < mate-maxPly &&
+		ss.excludedMove[ply] == 0 &&
 		staticEval-rfpDepthMargin*depth >= beta {
 		return staticEval - rfpDepthMargin*depth
 	}
 
-		// --- Razoring ---
+	// --- Razoring ---
 	// If static eval is far below alpha at shallow depth, the position is
 	// unlikely to improve enough with quiet moves. Drop into qsearch; if
 	// qsearch also fails low, return immediately without searching further.
@@ -393,7 +393,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		}
 	}
 
-		// --- ProbCut ---
+	// --- ProbCut ---
 	// If a tactical move already exceeds beta by a safety margin at reduced
 	// depth, assume the full node will also fail high and prune the rest.
 	if useProbcut && !isPv && !nodeInCheck && depth >= probcutMinDepth && beta < mate-maxPly &&
@@ -523,7 +523,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// Extend by one ply for moves that give check, plus singular extension.
 		newDepth := depth - 1 + extension
-		if givesCheck && extension == 0{
+		if givesCheck && extension == 0 {
 			newDepth++
 		}
 
@@ -579,7 +579,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// For subsequent moves, we use a Null-Window Search (-alpha-1, -alpha)
 		// to quickly prove they are worse than the PV. If a move fails high,
 		// we re-search it with the full window to find its true value.
-		if (!isReduced) {
+		if !isReduced {
 			if movesTried == 0 {
 				score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
 			} else {
@@ -635,9 +635,9 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	if bestScore == -inf {
 		// In a singular extension sub-search the excluded move may have been
 		// the only legal move; that's not checkmate or stalemate, just failure.
-		 if ss.excludedMove[ply] != 0 {
-		 	return alpha
-		 }
+		if ss.excludedMove[ply] != 0 {
+			return alpha
+		}
 		if p.inCheck() {
 			return -mate + ply // checkmate: prefer shorter mates
 		}
@@ -650,17 +650,17 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// Store the result in the TT with the appropriate bound type.
 	// Skip during singular extension sub-searches: their partial results
 	// (with one move excluded) must not corrupt the main TT entries.
-	 //bound := UPPER
-	 if ss.excludedMove[ply] == 0 {
-	if bestScore > origAlpha {
-		if isQuiet(p, bestMove) {
-			ss.updateHistory(p, bestMove, depth, ply, nil)
+	//bound := UPPER
+	if ss.excludedMove[ply] == 0 {
+		if bestScore > origAlpha {
+			if isQuiet(p, bestMove) {
+				ss.updateHistory(p, bestMove, depth, ply, nil)
+			}
+			storeTT(p.key, bestMove, bestScore, EXACT, depth, ply)
+		} else {
+			storeTT(p.key, 0, bestScore, UPPER, depth, ply)
 		}
-		storeTT(p.key, bestMove, bestScore, EXACT, depth, ply)
-	} else {
-		storeTT(p.key, 0, bestScore, UPPER, depth, ply)
 	}
-	 }
 
 	return bestScore
 }

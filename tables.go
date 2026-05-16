@@ -114,51 +114,51 @@ const (
 
 // Search and engine limits.
 const (
-	maxPly            = 64       // maximum search depth
-	maxMoves          = 256      // maximum legal moves in any position
-	inf               = 32767    // larger than any real score; used as +/-inf
-	mate              = 32000    // base value of checkmate score
-	maxEval           = 29999    // largest returned by evaluate(); mate scores exceed this
-	useRFP            = true
-	rfpDepth          = 6 // was 8
-	rfpMargin         = 80       // centipawns per depth for reverse futility pruning (not improving)
-	rfpImpMargin      = 60       // centipawns per depth for reverse futility pruning (improving)
-	noEval            = -inf - 1 // sentinel: no static eval stored for this ply (in check)
-	
-	useFutility       = false
-	fpMargin          = 120      // centipawns per depth for main-search move-loop futility pruning
-	fpMaxDepth        = 4        // only prune quiet moves by futility at shallow depth
-	
+	maxPly       = 64    // maximum search depth
+	maxMoves     = 256   // maximum legal moves in any position
+	inf          = 32767 // larger than any real score; used as +/-inf
+	mate         = 32000 // base value of checkmate score
+	maxEval      = 29999 // largest returned by evaluate(); mate scores exceed this
+	useRFP       = true
+	rfpDepth     = 6        // was 8
+	rfpMargin    = 80       // centipawns per depth for reverse futility pruning (not improving)
+	rfpImpMargin = 60       // centipawns per depth for reverse futility pruning (improving)
+	noEval       = -inf - 1 // sentinel: no static eval stored for this ply (in check)
+
+	useFutility = false
+	fpMargin    = 120 // centipawns per depth for main-search move-loop futility pruning
+	fpMaxDepth  = 4   // only prune quiet moves by futility at shallow depth
+
 	useNULL           = true
-	nmpBaseReduction  = 2        // base ply reduction for null-move pruning
-	nmpDepthReduction = 6        // depth divisor for depth-scaled NMP reduction
+	nmpBaseReduction  = 2 // base ply reduction for null-move pruning
+	nmpDepthReduction = 6 // depth divisor for depth-scaled NMP reduction
 
-	useIIR            = false
-	IIRmaxDepth       = 4
-	
-	useProbcut        = false
-	probcutMargin     = 120      // extra margin above beta for ProbCut verification
-	probcutMinDepth   = 6        // only apply ProbCut when enough depth remains
-	probcutReduction  = 2        // depth reduction used by the reduced verification search
-	
-	useSingularExt    = false
-	useDoubleExt      = false
-	seBetaMargin      = 6        // centipawns per ply subtracted from ttScore for singular verification
-	seDoubleMargin    = 64       // extra centipawns below singular beta needed for a double extension
-	
-	useRazoring       = false
-	maxRazorDepth     = 3
-	razorMargin       = 300      // centipawns per depth for razoring
-	
-	qsFpPawnMargin    = 300      // qs futility margin when capturing a pawn (passers warrant extra slack)
-	qsFpPieceMargin   = 200      // qs futility margin when capturing a piece
-	qsLmpLimit        = 2        // max captures tried per qs node (outside check) to cap explosion
-	
-	useLMP            = true
-	LMPnormalStep     = 6        // TODO: test 4, as was previously
-	LMPimprovingStep  = 6
+	useIIR      = false
+	IIRmaxDepth = 4
 
-	useLMR            = true
+	useProbcut       = false
+	probcutMargin    = 120 // extra margin above beta for ProbCut verification
+	probcutMinDepth  = 6   // only apply ProbCut when enough depth remains
+	probcutReduction = 2   // depth reduction used by the reduced verification search
+
+	useSingularExt = false
+	useDoubleExt   = false
+	seBetaMargin   = 6  // centipawns per ply subtracted from ttScore for singular verification
+	seDoubleMargin = 64 // extra centipawns below singular beta needed for a double extension
+
+	useRazoring   = true
+	maxRazorDepth = 3
+	razorMargin   = 300 // centipawns per depth for razoring
+
+	qsFpPawnMargin  = 300 // qs futility margin when capturing a pawn (passers warrant extra slack)
+	qsFpPieceMargin = 200 // qs futility margin when capturing a piece
+	qsLmpLimit      = 2   // max captures tried per qs node (outside check) to cap explosion
+
+	useLMP           = true
+	LMPnormalStep    = 6 // TODO: test 4, as was previously
+	LMPimprovingStep = 6
+
+	useLMR = true
 )
 
 // TEST POSITION 6k1/ppp2p1p/6p1/3p4/3n4/4B2P/P1P1rPP1/3n2K1 b - - 1 20 ???
