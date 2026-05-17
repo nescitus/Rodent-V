@@ -340,6 +340,24 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		ss.evalStack[ply] = noEval
 	}
 
+	// --- TT-adjusted eval ---
+	// When the TT holds a score that is consistent with the direction of the
+	// static eval's likely error, use it as a sharper proxy for the true value.
+	// A LOWER-bound score >= staticEval means the position is probably better
+	// than the static eval; an UPPER-bound score <= staticEval means it's
+	// probably worse.  Using this refined estimate makes RFP, razoring, and
+	// NMP trigger on more accurate information.
+	// Guard: only valid when not in check (staticEval is meaningless then)
+	// and when there is no excluded move (singular extension sub-search).
+	ttAdjustedEval := staticEval
+	if !nodeInCheck && ss.excludedMove[ply] == 0 && ttFlag != 0 {
+		if ttFlag == EXACT ||
+			(ttFlag == LOWER && ttScore >= staticEval) ||
+			(ttFlag == UPPER && ttScore <= staticEval) {
+			ttAdjustedEval = ttScore
+		}
+	}
+
 	// --- Reverse futility pruning ---
 	// If the static eval beats beta by a depth-scaled margin, the position
 	// is already so good that a full search is unlikely to fall below beta.
@@ -355,8 +373,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// }
 	if useRFP && !isPv && !nodeInCheck && depth <= rfpDepth && beta < mate-maxPly &&
 		ss.excludedMove[ply] == 0 &&
-		staticEval-rfpDepthMargin*depth >= beta {
-		return staticEval - rfpDepthMargin*depth
+		ttAdjustedEval-rfpDepthMargin*depth >= beta {
+		return ttAdjustedEval - rfpDepthMargin*depth
 	}
 
 	// --- Razoring ---
@@ -365,7 +383,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// qsearch also fails low, return immediately without searching further.
 	if useRazoring && !isPv && !nodeInCheck && !wasNull && depth <= maxRazorDepth &&
 		ss.excludedMove[ply] == 0 &&
-		staticEval <= alpha-razorMargin*depth { // try 200 + 60 * depth
+		ttAdjustedEval <= alpha-razorMargin*depth { // try 200 + 60 * depth
 		s := ss.quiesceCheck(p, ply, alpha, beta, pv)
 		if s <= alpha {
 			return s
@@ -376,7 +394,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// Skip if: depth <= 1 (too shallow to be reliable), the position
 	// is already beyond beta, we are in check, or only pawns remain.
 	// Reduction = base + depth/depthDiv + min((eval-beta)/evalDiv, maxEvalBonus).
-	if depth > 1 && !isPv && !nodeInCheck && !wasNull && p.canNullMove() && beta <= staticEval && useNULL && ss.excludedMove[ply] == 0 {
+	if depth > 1 && !isPv && !nodeInCheck && !wasNull && p.canNullMove() && beta <= ttAdjustedEval && useNULL && ss.excludedMove[ply] == 0 {
 		ss.contValid[ply] = false // null move: no valid piece context for cont hist
 		reduction := nmpBaseReduction + depth/nmpDepthReduction
 		var u Undo
