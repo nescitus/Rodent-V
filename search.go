@@ -420,7 +420,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 				continue
 			}
 
-			score = -ss.quiesceCheck(p, ply+1, -probcutBeta, -probcutBeta+1, probcutPv[:])
+			score = -ss.quiesce(p, ply+1, -probcutBeta, -probcutBeta+1, probcutPv[:])
 			if score >= probcutBeta && probcutDepth > 0 {
 				score = -ss.search(p, ply+1, -probcutBeta, -probcutBeta+1, probcutDepth, false, probcutPv[:])
 			}

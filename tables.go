@@ -136,7 +136,7 @@ const (
 	useIIR      = false
 	IIRmaxDepth = 4
 
-	useProbcut       = false
+	useProbcut       = true
 	probcutMargin    = 120 // extra margin above beta for ProbCut verification
 	probcutMinDepth  = 6   // only apply ProbCut when enough depth remains
 	probcutReduction = 2   // depth reduction used by the reduced verification search
