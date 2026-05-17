@@ -353,7 +353,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	// if improving {
 	// 	rfpDepthMargin = rfpImpMargin
 	// }
-	if !useRFP && isPv && !nodeInCheck && depth <= rfpDepth && beta < mate-maxPly &&
+	if useRFP && !isPv && !nodeInCheck && depth <= rfpDepth && beta < mate-maxPly &&
 		ss.excludedMove[ply] == 0 &&
 		staticEval-rfpDepthMargin*depth >= beta {
 		return staticEval - rfpDepthMargin*depth
