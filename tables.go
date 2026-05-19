@@ -133,7 +133,7 @@ const (
 	nmpBaseReduction  = 2 // base ply reduction for null-move pruning
 	nmpDepthReduction = 6 // depth divisor for depth-scaled NMP reduction
 
-	useIIR      = false
+	useIIR      = true
 	IIRmaxDepth = 4
 
 	useProbcut       = true
