@@ -55,7 +55,7 @@ func attacksFrom(p *Pos, sq int) uint64 {
 func attacksTo(p *Pos, sq int) uint64 {
 	occ := p.occupied()
 	return (p.pieceBB(White, P) & pawnAtk[Black][sq]) | // White pawns attack from below
-		(p.pieceBB(Black, P) & pawnAtk[White][sq]) |    // Black pawns attack from above
+		(p.pieceBB(Black, P) & pawnAtk[White][sq]) | // Black pawns attack from above
 		(p.typeBB[N] & knightAtk[sq]) |
 		((p.typeBB[B] | p.typeBB[Q]) & bishopAttacks(occ, sq)) |
 		((p.typeBB[R] | p.typeBB[Q]) & rookAttacks(occ, sq)) |
@@ -72,4 +72,110 @@ func isAttacked(p *Pos, sq, side int) bool {
 		((p.pieceBB(side, B)|p.pieceBB(side, Q))&bishopAttacks(occ, sq) != 0) ||
 		((p.pieceBB(side, R)|p.pieceBB(side, Q))&rookAttacks(occ, sq) != 0) ||
 		(p.pieceBB(side, K)&kingAtk[sq] != 0)
+}
+
+// Detect whether a move gives check
+// without making it on the board
+func moveGivesCheck(p *Pos, move int) bool {
+	var checks uint64
+
+	side := p.side
+	from := moveFrom(move)
+	to := moveTo(move)
+	fromType := p.typeAt(from) // moving piece
+	toType := p.typeAt(to)     // captured piece, if any
+	typeOfMove := moveType(move)
+
+	// What piece is placed on the destination square?
+	placedPiece := fromType
+	if isProm(move) {
+		placedPiece = promType(move)
+	}
+
+	// Locate enemy king
+	kingSquare := p.kingSq[opp(side)]
+
+	// Direct checks by a pawn
+	if placedPiece == P {
+		checks = shiftForward(shiftSides(squareBit(kingSquare)), opp(side))
+		if checks&squareBit(to) != 0 {
+			return true
+		}
+	}
+
+	// Direct checks by a knight
+	if placedPiece == N {
+		checks = knightAtk[to]
+		if checks&squareBit(kingSquare) != 0 {
+			return true
+		}
+	}
+
+	// Prepare occupancy after the move.
+	// Remove moving piece from origin...
+	occAfter := p.occupied() ^ squareBit(from)
+
+	// ...place moving piece on destination.
+	occAfter |= squareBit(to)
+
+	// En passant: captured pawn is not on `to`, remove it explicitly.
+	if typeOfMove == EP_CAP {
+		dir := -8
+		if side == Black {
+			dir = 8
+		}
+		occAfter ^= squareBit(to + dir)
+	}
+
+	// For direct slider checks from the moved piece, remove that piece
+	// itself from occupancy when generating attacks from `to`.
+	occForMovedPiece := occAfter ^ squareBit(to)
+
+	// Direct diagonal checks
+	if placedPiece == B || placedPiece == Q {
+		checks = bishopAttacks(occForMovedPiece, to)
+		if checks&squareBit(kingSquare) != 0 {
+			return true
+		}
+	}
+
+	// Direct orthogonal checks
+	if placedPiece == R || placedPiece == Q {
+		checks = rookAttacks(occForMovedPiece, to)
+		if checks&squareBit(kingSquare) != 0 {
+			return true
+		}
+	}
+
+	// Discovered checks use occupancy after the move.
+	occ := occAfter
+
+	// Diagonal discovered checks
+	checks = bishopAttacks(occ, kingSquare)
+	if checks&(p.pieceBB(side, B)|p.pieceBB(side, Q)) != 0 {
+		return true
+	}
+
+	// Orthogonal discovered checks
+	checks = rookAttacks(occ, kingSquare)
+	if checks&(p.pieceBB(side, R)|p.pieceBB(side, Q)) != 0 {
+		return true
+	}
+
+	// Horizontal checks discovered by castling
+	// (we make and unmake a move, as it's rare enough
+	// and writing out correct conditions would be hard)
+	if typeOfMove == CASTLE {
+		var u Undo
+		makeMove(p, move, &u)
+		isInCheck := p.inCheck()
+		unmakeMove(p, move, &u)
+		return isInCheck
+	}
+
+	// toType is intentionally kept, even though it is no longer needed in
+	// this version, because it can be useful for debugging / future tweaks.
+	_ = toType
+
+	return false
 }

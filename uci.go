@@ -59,6 +59,16 @@ func uciLoop() {
 	parseFEN(&p, startFEN)
 	allocTT(16)
 
+	// Allocate one SearchState per thread slot.
+	// The main thread always uses states[0]; helpers use states[1..N-1].
+	// Allocate enough for the maximum allowed thread count up front so
+	// we never allocate during a search.
+	const maxAllowedThreads = 256
+	states := make([]*SearchState, maxAllowedThreads)
+	for i := range states {
+		states[i] = new(SearchState)
+	}
+
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 65536), 65536)
 
@@ -83,10 +93,11 @@ func uciLoop() {
 
 		switch tokens[0] {
 		case "uci":
-			fmt.Println("id name Rodent V 0.2.13")
+			fmt.Println("id name Rodent V 0017")
 			fmt.Println("id author Naman Thanki, Pawel Koziol, based on Sungorus by Pablo Vazquez")
 			fmt.Println("option name Hash type spin default 16 min 1 max 4096")
 			fmt.Println("option name Clear Hash type button")
+			fmt.Println("option name Threads type spin default 1 min 1 max 256")
 			printUciOptions()
 			fmt.Println("uciok")
 
@@ -100,8 +111,9 @@ func uciLoop() {
 		case "ucinewgame":
 			stopSearch()
 			clearTT()
-			clearHistory()
-			contValid = [maxPly]bool{}
+			for i := 0; i < numThreads; i++ {
+				states[i].clearHistory()
+			}
 			parseFEN(&p, startFEN)
 
 		case "position":
@@ -123,7 +135,7 @@ func uciLoop() {
 			searchDone   = make(chan struct{})
 			go func(pos Pos, done chan struct{}, maxDepth int) {
 				defer close(done)
-				think(&pos, maxDepth)
+				think(&pos, states, maxDepth)
 			}(posForSearch, searchDone, md)
 
 		case "stop":
@@ -206,6 +218,18 @@ func parseSetOption(tokens []string) {
 
 	case strings.EqualFold(name, "Clear Hash"):
 		clearTT()
+		return
+
+	case strings.EqualFold(name, "Threads"):
+		if n, err := strconv.Atoi(value); err == nil {
+			if n < 1 {
+				n = 1
+			}
+			if n > 256 {
+				n = 256
+			}
+			numThreads = n
+		}
 		return
 	}
 

@@ -56,15 +56,7 @@ const (
 	corrHistMax         = corrHistGrain * 32 // absolute clamp
 )
 
-// Global heuristic tables, reset before each new search.
-var (
-	histTable       [2][64][64]int          // history[side][fromSq][toSq]
-	contHistMain    [2][6][64][2][6][64]int // continuation history[prevSide][prevPieceType][prevTo][side][pieceType][to]
-	killerMoves     [maxPly][2]int          // killerMoves[ply][0..1]
-	moveBuffers     [maxPly]MovePicker      // pre-allocated pickers, one per ply; avoids zeroing 6 KB on every node
-	corrHist        [2][corrHistSize]int    // pawn correction history[side][pawnKeyIndex]
-	nonPawnCorrHist [2][2][corrHistSize]int // non-pawn correction history[nonPawnColor][side][index]
-)
+// Heuristic tables are now per-thread fields inside SearchState (thread.go).
 
 type MoveGenStage int
 
@@ -84,6 +76,7 @@ const (
 // order.  The search constructs one per node and calls nextMove()
 // until it returns 0.
 type MovePicker struct {
+	ss       *SearchState // owning thread's state (for history lookup)
 	p        *Pos
 	phase    MoveGenStage  // which pipeline stage we are in (0-7)
 	ttMove   int           // the transposition table move hint
@@ -100,13 +93,15 @@ type MovePicker struct {
 }
 
 // initMovePicker initialises the picker for a new node.
+// ss is the owning thread's SearchState (for history tables and killers).
 // transMove is the move hint from the TT (0 if none).
-func initMovePicker(p *Pos, m *MovePicker, transMove, ply int) {
+func initMovePicker(p *Pos, m *MovePicker, ss *SearchState, transMove, ply int) {
+	m.ss = ss
 	m.p = p
 	m.phase = 0
 	m.ttMove = transMove
-	m.killer1 = killerMoves[ply][0]
-	m.killer2 = killerMoves[ply][1]
+	m.killer1 = ss.killerMoves[ply][0]
+	m.killer2 = ss.killerMoves[ply][1]
 	m.ply = ply
 }
 
@@ -201,6 +196,72 @@ startPhase:
 	return 0, StageDone
 }
 
+func (m *MovePicker) nextCaptureOrCheck() (int, MoveGenStage) {
+startPhase:
+	switch m.phase {
+	case StageTTMove:
+		move := m.ttMove
+		m.phase = StageGenCaptures
+		if move != 0 && isLegal(m.p, move) {
+			return move, StageTTMove
+		}
+		goto startPhase
+
+	case StageGenCaptures:
+		m.end = genCaptures(m.p, m.move[:])
+		m.cur = 0
+		m.badCount = 0
+		scoreCaptures(m)
+		m.phase = StageGoodCaptures
+		goto startPhase
+
+	case StageGoodCaptures:
+		for m.cur < m.end {
+			move := m.pickBest()
+			if move == m.ttMove {
+				continue
+			}
+			if isBadCapture(m.p, move) {
+				m.badCaps[m.badCount] = move
+				m.badCount++
+				continue
+			}
+			return move, StageGoodCaptures
+		}
+		m.phase = StageGenQuiet
+		goto startPhase
+
+	case StageGenQuiet:
+		m.end = genChecks(m.p, m.move[:])
+		m.cur = 0
+		scoreQuiet(m)
+		m.phase = StageQuiet
+		goto startPhase
+
+	case StageQuiet:
+		for m.cur < m.end {
+			move := m.pickBest()
+			if move == m.ttMove || move == m.killer1 || move == m.killer2 {
+				continue
+			}
+			return move, StageQuiet
+		}
+		m.badCur = 0
+		m.phase = StageBadCaptures
+		goto startPhase
+
+	case StageBadCaptures:
+		if m.badCur < m.badCount {
+			move := m.badCaps[m.badCur]
+			m.badCur++
+			return move, StageBadCaptures
+		}
+	}
+
+	m.phase = StageDone
+	return 0, StageDone
+}
+
 // ---- Capture-only picker for quiescence search ----
 
 // initQSearch prepares m to iterate only over captures, for use in
@@ -233,6 +294,7 @@ func scoreCaptures(m *MovePicker) {
 // scoreQuiet assigns history heuristic scores to quiet moves,
 // including 1-ply and 2-ply continuation history.
 func scoreQuiet(m *MovePicker) {
+	ss := m.ss
 	side := m.p.side
 	ply := m.ply
 	for i := 0; i < m.end; i++ {
@@ -240,12 +302,12 @@ func scoreQuiet(m *MovePicker) {
 		from := moveFrom(mv)
 		to := moveTo(mv)
 		pt := m.p.typeAt(from) // piece type (0-5)
-		score := histTable[side][from][to]
-		if ply >= 1 && contValid[ply-1] {
-			score += contHistMain[contSide[ply-1]][contPiece[ply-1]][contTo[ply-1]][side][pt][to]
+		score := ss.histTable[side][from][to]
+		if ply >= 1 && ss.contValid[ply-1] {
+			score += ss.contHistMain[ss.contSide[ply-1]][ss.contPiece[ply-1]][ss.contTo[ply-1]][side][pt][to]
 		}
-		if ply >= 2 && contValid[ply-2] {
-			score += contHistMain[contSide[ply-2]][contPiece[ply-2]][contTo[ply-2]][side][pt][to]
+		if ply >= 2 && ss.contValid[ply-2] {
+			score += ss.contHistMain[ss.contSide[ply-2]][ss.contPiece[ply-2]][ss.contTo[ply-2]][side][pt][to]
 		}
 		m.value[i] = score
 	}
@@ -304,25 +366,14 @@ func mvvLva(p *Pos, move int) int {
 	return 5 // default (e.g. quiet ep-set)
 }
 
-// clearHistory resets both heuristic tables before each new search
-// so that scores from a different root position do not contaminate
-// the ordering.
-func clearHistory() {
-	histTable = [2][64][64]int{}
-	contHistMain = [2][6][64][2][6][64]int{}
-	killerMoves = [maxPly][2]int{}
-	corrHist = [2][corrHistSize]int{}
-	nonPawnCorrHist = [2][2][corrHistSize]int{}
-}
-
 // getCorrection returns the total correction value for the position,
 // combining pawn and non-pawn correction history.
-func getCorrection(p *Pos) int {
+func (ss *SearchState) getCorrection(p *Pos) int {
 	side := p.side
 	pawnIdx := int((p.pawnKey[White] ^ p.pawnKey[Black]) % corrHistSize)
-	corr := corrHist[side][pawnIdx] / corrHistGrain
-	corr += nonPawnCorrHist[White][side][int(p.nonPawnKey[White]%corrHistSize)] / corrHistGrain
-	corr += nonPawnCorrHist[Black][side][int(p.nonPawnKey[Black]%corrHistSize)] / corrHistGrain
+	corr := ss.corrHist[side][pawnIdx] / corrHistGrain
+	corr += ss.nonPawnCorrHist[White][side][int(p.nonPawnKey[White]%corrHistSize)] / corrHistGrain
+	corr += ss.nonPawnCorrHist[Black][side][int(p.nonPawnKey[Black]%corrHistSize)] / corrHistGrain
 	return corr
 }
 
@@ -333,14 +384,14 @@ func updateCorrEntry(entry *int, newWeight, scaledDiff int) {
 }
 
 // addCorrection updates all correction history entries for the position.
-func addCorrection(p *Pos, depth, diff int) {
+func (ss *SearchState) addCorrection(p *Pos, depth, diff int) {
 	side := p.side
 	newWeight := min(16, 1+depth)
 	scaledDiff := diff * corrHistGrain
 	pawnIdx := int((p.pawnKey[White] ^ p.pawnKey[Black]) % corrHistSize)
-	updateCorrEntry(&corrHist[side][pawnIdx], newWeight, scaledDiff)
-	updateCorrEntry(&nonPawnCorrHist[White][side][int(p.nonPawnKey[White]%corrHistSize)], newWeight, scaledDiff)
-	updateCorrEntry(&nonPawnCorrHist[Black][side][int(p.nonPawnKey[Black]%corrHistSize)], newWeight, scaledDiff)
+	updateCorrEntry(&ss.corrHist[side][pawnIdx], newWeight, scaledDiff)
+	updateCorrEntry(&ss.nonPawnCorrHist[White][side][int(p.nonPawnKey[White]%corrHistSize)], newWeight, scaledDiff)
+	updateCorrEntry(&ss.nonPawnCorrHist[Black][side][int(p.nonPawnKey[Black]%corrHistSize)], newWeight, scaledDiff)
 }
 
 // histBonus returns the bonus/malus value for a history update at the
@@ -373,7 +424,7 @@ func isQuiet(p *Pos, move int) bool {
 // The bonus rewards the cutoff move; the malus makes failed quiets
 // less likely to be tried early in future sibling nodes.
 // Killers store the two most recent cutoff moves at this ply.
-func updateHistory(p *Pos, move, depth, ply int, quietsTried []int) {
+func (ss *SearchState) updateHistory(p *Pos, move, depth, ply int, quietsTried []int) {
 	bonus := histBonus(depth)
 	malus := -bonus
 	side := p.side
@@ -382,16 +433,16 @@ func updateHistory(p *Pos, move, depth, ply int, quietsTried []int) {
 	updateCont := func(mv, delta int) {
 		pt := p.typeAt(moveFrom(mv))
 		to := moveTo(mv)
-		if ply >= 1 && contValid[ply-1] {
-			histUpdate(&contHistMain[contSide[ply-1]][contPiece[ply-1]][contTo[ply-1]][side][pt][to], delta)
+		if ply >= 1 && ss.contValid[ply-1] {
+			histUpdate(&ss.contHistMain[ss.contSide[ply-1]][ss.contPiece[ply-1]][ss.contTo[ply-1]][side][pt][to], delta)
 		}
-		if ply >= 2 && contValid[ply-2] {
-			histUpdate(&contHistMain[contSide[ply-2]][contPiece[ply-2]][contTo[ply-2]][side][pt][to], delta)
+		if ply >= 2 && ss.contValid[ply-2] {
+			histUpdate(&ss.contHistMain[ss.contSide[ply-2]][ss.contPiece[ply-2]][ss.contTo[ply-2]][side][pt][to], delta)
 		}
 	}
 
 	// Reward the cutoff move.
-	histUpdate(&histTable[side][moveFrom(move)][moveTo(move)], bonus)
+	histUpdate(&ss.histTable[side][moveFrom(move)][moveTo(move)], bonus)
 	updateCont(move, bonus)
 
 	// Penalise all quiets that were searched but did not cut off.
@@ -399,13 +450,13 @@ func updateHistory(p *Pos, move, depth, ply int, quietsTried []int) {
 		if tried == move {
 			continue
 		}
-		histUpdate(&histTable[side][moveFrom(tried)][moveTo(tried)], malus)
+		histUpdate(&ss.histTable[side][moveFrom(tried)][moveTo(tried)], malus)
 		updateCont(tried, malus)
 	}
 
 	// Update killers.
-	if move != killerMoves[ply][0] {
-		killerMoves[ply][1] = killerMoves[ply][0]
-		killerMoves[ply][0] = move
+	if move != ss.killerMoves[ply][0] {
+		ss.killerMoves[ply][1] = ss.killerMoves[ply][0]
+		ss.killerMoves[ply][0] = move
 	}
 }

@@ -114,27 +114,58 @@ const (
 
 // Search and engine limits.
 const (
-	maxPly            = 64       // maximum search depth
-	maxMoves          = 256      // maximum legal moves in any position
-	inf               = 32767    // larger than any real score; used as +/-inf
-	mate              = 32000    // base value of checkmate score
-	maxEval           = 29999    // largest returned by evaluate(); mate scores exceed this
-	rfpMargin         = 100      // centipawns per depth for reverse futility pruning (not improving)
-	rfpImpMargin      = 60       // centipawns per depth for reverse futility pruning (improving)
-	noEval            = -inf - 1 // sentinel: no static eval stored for this ply (in check)
-	fpMargin          = 120      // centipawns per depth for main-search move-loop futility pruning
-	fpMaxDepth        = 4        // only prune quiet moves by futility at shallow depth
-	nmpBaseReduction  = 3        // base ply reduction for null-move pruning
-	nmpDepthReduction = 3        // depth divisor for depth-scaled NMP reduction
-	probcutMargin     = 120      // extra margin above beta for ProbCut verification
-	probcutMinDepth   = 6        // only apply ProbCut when enough depth remains
-	probcutReduction  = 2        // depth reduction used by the reduced verification search
-	seBetaMargin      = 6        // centipawns per ply subtracted from ttScore for singular verification
-	seDoubleMargin    = 64       // extra centipawns below singular beta needed for a double extension
-	razorMargin       = 300      // centipawns per depth for razoring
-	qsFpMargin        = 100      // base margin for quiescence futility pruning
-	qsLmpLimit        = 2        // max captures tried per qs node (outside check) to cap explosion
+	maxPly   = 64    // maximum search depth
+	maxMoves = 256   // maximum legal moves in any position
+	inf      = 32767 // larger than any real score; used as +/-inf
+	mate     = 32000 // base value of checkmate score
+	maxEval  = 29999 // largest returned by evaluate(); mate scores exceed this
+
+	useRFP       = true
+	rfpDepth     = 8        // was 8 !!!
+	rfpMargin    = 80       // centipawns per depth for reverse futility pruning (not improving)
+	rfpImpMargin = 60       // centipawns per depth for reverse futility pruning (improving)
+	noEval       = -inf - 1 // sentinel: no static eval stored for this ply (in check)
+
+	useRazoring   = true
+	maxRazorDepth = 3
+	razorMargin   = 300 // centipawns per depth for razoring
+
+	useNULL           = true
+	nmpBaseReduction  = 3 // base ply reduction for null-move pruning
+	nmpDepthReduction = 3 // depth divisor for depth-scaled NMP reduction
+
+	useProbcut       = true
+	probcutMargin    = 120 // extra margin above beta for ProbCut verification
+	probcutMinDepth  = 6   // only apply ProbCut when enough depth remains
+	probcutReduction = 2   // depth reduction used by the reduced verification search
+
+	useIIR      = true
+	IIRmaxDepth = 4
+
+	useSingularExt = true
+	useDoubleExt   = true
+	seBetaMargin   = 6  // centipawns per ply subtracted from ttScore for singular verification
+	seDoubleMargin = 64 // extra centipawns below singular beta needed for a double extension
+
+	useLMP           = true
+	LMPnormalStep    = 4
+	LMPimprovingStep = 6
+
+	useFutility = true
+	fpMargin    = 120 // centipawns per depth for main-search move-loop futility pruning
+	fpMaxDepth  = 4   // only prune quiet moves by futility at shallow depth
+
+	useLMR = true
+
+	qsFpPawnMargin  = 300 // qs futility margin when capturing a pawn (passers warrant extra slack)
+	qsFpPieceMargin = 200 // qs futility margin when capturing a piece
+	qsLmpLimit      = 2   // max captures tried per qs node (outside check) to cap explosion
+
 )
+
+// TEST POSITION 6k1/ppp2p1p/6p1/3p4/3n4/4B2P/P1P1rPP1/3n2K1 b - - 1 20 ???
+
+// TEST POSITION r2q1rk1/1b3p1p/p3pPp1/2ppP3/7R/1PN1B1R1/1PP2P1P/4K3 w - - 1 3
 
 // startFEN is the standard opening position in FEN notation.
 // sideKey is XORed into the Zobrist hash whenever Black is to move.
@@ -147,12 +178,11 @@ const (
 // BITBOARD MASKS
 // ================================================================
 //
-//   A bitboard is a uint64 where bit N is set if square N is
-//   occupied.  File A is the LSB column; rank 1 is the LSB row.
+//	A bitboard is a uint64 where bit N is set if square N is
+//	occupied.  File A is the LSB column; rank 1 is the LSB row.
 //
-//   These constants cover full ranks, files, and the two long
-//   diagonals needed to initialise the sliding-attack tables.
-//
+//	These constants cover full ranks, files, and the two long
+//	diagonals needed to initialise the sliding-attack tables.
 const (
 	rank1BB = uint64(0x00000000000000FF)
 	rank2BB = uint64(0x000000000000FF00)
@@ -181,31 +211,30 @@ const (
 // PRECOMPUTED ATTACK TABLES
 // ================================================================
 //
-//   All attack tables are filled once at startup by initTables().
-//   After that they are read-only, so no synchronisation is needed.
+//	All attack tables are filled once at startup by initTables().
+//	After that they are read-only, so no synchronisation is needed.
 //
-//   lineMasks[dir][sq]: bitboard of all squares on the rank/file/
-//                       diagonal through sq. dir: 0=rank, 1=file,
-//                       2=diag (A1->H8), 3=anti (A8->H1).
+//	lineMasks[dir][sq]: bitboard of all squares on the rank/file/
+//	                    diagonal through sq. dir: 0=rank, 1=file,
+//	                    2=diag (A1->H8), 3=anti (A8->H1).
 //
-//   pawnAtk[color][sq]: squares a pawn of the given color attacks
-//                       from sq.
+//	pawnAtk[color][sq]: squares a pawn of the given color attacks
+//	                    from sq.
 //
-//   knightAtk[sq], kingAtk[sq]: pre-computed leap attacks.
+//	knightAtk[sq], kingAtk[sq]: pre-computed leap attacks.
 //
-//   passedMask[color][sq]: bitboard of squares in front of sq (on
-//                       the same and adjacent files) that must be
-//                       free of enemy pawns for sq's pawn to be
-//                       "passed."
+//	passedMask[color][sq]: bitboard of squares in front of sq (on
+//	                    the same and adjacent files) that must be
+//	                    free of enemy pawns for sq's pawn to be
+//	                    "passed."
 //
-//   adjFileMask[file]: bitboard of the two files adjacent to file
-//                      (used to detect isolated pawns).
+//	adjFileMask[file]: bitboard of the two files adjacent to file
+//	                   (used to detect isolated pawns).
 //
-//   pstTable[type][sq]: piece-square table bonus in centipawns.
+//	pstTable[type][sq]: piece-square table bonus in centipawns.
 //
-//   castleMask[sq]: AND-mask applied to castling rights when a
-//                   piece on sq moves (or is captured).
-//
+//	castleMask[sq]: AND-mask applied to castling rights when a
+//	                piece on sq moves (or is captured).
 var (
 	lineMasks  [4][64]uint64
 	pawnAtk    [2][64]uint64
@@ -219,10 +248,9 @@ var (
 // same pieces, castling rights, and en-passant state are guaranteed
 // to share the same key (with overwhelming probability).
 //
-//   zobPiece[piece][sq]: piece placed on a square
-//   zobCastle[flags]: castling-rights nibble (4 bits -> 16 combos)
-//   zobEP[file]: en-passant file (0-7)
-//
+//	zobPiece[piece][sq]: piece placed on a square
+//	zobCastle[flags]: castling-rights nibble (4 bits -> 16 combos)
+//	zobEP[file]: en-passant file (0-7)
 var (
 	zobPiece  [12][64]uint64
 	zobCastle [16]uint64

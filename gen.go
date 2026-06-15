@@ -361,3 +361,72 @@ func genQuiet(p *Pos, list []int) int {
 
 	return n
 }
+
+// generates selected checks (non-discovered piece checks)
+func genChecks(p *Pos, list []int) int {
+	n     := 0
+	side  := p.side
+	occ   := p.occupied()
+	empty := p.empty()
+	ksq := p.kingSq[opp(side)]
+	nChecks := knightAtk[ksq] & empty
+	bChecks := bishopAttacks(occ, ksq) & empty
+	rChecks := rookAttacks(occ, ksq) & empty
+	qChecks := rChecks | bChecks
+
+
+	// ---- Knight quiet checks ----
+	pieces := p.pieceBB(side, N)
+	for pieces != 0 {
+		from := lsb(pieces)
+		bb   := knightAtk[from] & nChecks
+		for bb != 0 {
+			to := lsb(bb)
+			list[n] = (to << 6) | from; n++
+			bb &= bb - 1
+		}
+		pieces &= pieces - 1
+	}
+
+	// ---- Bishop quiet checks ----
+	pieces = p.pieceBB(side, B)
+	for pieces != 0 {
+		from := lsb(pieces)
+		bb   := bishopAttacks(occ, from) & bChecks
+		for bb != 0 {
+			to := lsb(bb)
+			list[n] = (to << 6) | from; n++
+			bb &= bb - 1
+		}
+		pieces &= pieces - 1
+	}
+
+	// ---- Rook quiet checks ----
+	pieces = p.pieceBB(side, R)
+	for pieces != 0 {
+		from := lsb(pieces)
+		bb   := rookAttacks(occ, from) & rChecks
+		for bb != 0 {
+			to := lsb(bb)
+			list[n] = (to << 6) | from; n++
+			bb &= bb - 1
+		}
+		pieces &= pieces - 1
+	}
+
+	// ---- Queen quiet checks ----
+	pieces = p.pieceBB(side, Q)
+	for pieces != 0 {
+		from := lsb(pieces)
+		bb   := queenAttacks(occ, from) & qChecks
+		for bb != 0 {
+			to := lsb(bb)
+			list[n] = (to << 6) | from; n++
+			bb &= bb - 1
+		}
+		pieces &= pieces - 1
+	}
+
+	return n
+}
+

@@ -1,5 +1,5 @@
 // ================================================================
-// S9  TRANSPOSITION TABLE
+// S9  TRANSPOSITION TABLE  (XOR lockless, thread-safe)
 // ================================================================
 //
 //   The transposition table (TT) is a hash map from position keys to
@@ -15,55 +15,60 @@
 //   lookup we check all 4; on a store we replace the one that is
 //   oldest or shallowest.
 //
-//   4-WAY ASSOCIATIVITY
-//   -------------------
-//   A direct-mapped table (one slot per key) suffers from high
-//   collision rates.  Four slots per bucket reduces collisions by
-//   almost 4x at a cost of 4x the memory bandwidth, a good trade.
-//   ttMask = ttSize - 4 ensures the base index is always aligned to
-//   a 4-entry boundary.
+//   XOR LOCKLESS HASHING  (Hyatt & Mann, ICGA 2002)
+//   -------------------------------------------------
+//   Each Entry is two 64-bit words: data (packed payload) and hash
+//   (position key XOR data).  Reads and writes use sync/atomic so
+//   each word is always read/written atomically.  Even if two threads
+//   race on the same entry, the XOR invariant detects the corruption:
 //
-//   ENTRY FIELDS
-//   ------------
-//   key: full 64-bit Zobrist key for collision detection.
-//   move: best move found (or 0); used as a hint by the next search.
-//   score: the search score. Mate scores are stored relative to
-//          the root (not relative to the position), so they are
-//          adjusted by ply on store and probe.
-//   depth: remaining depth when the entry was stored.
-//   bound: UPPER, LOWER, or EXACT (see constants in tables.go).
-//   date: the search "generation" counter when this was stored;
-//         used to prefer recent entries over stale ones.
+//     probe:  data := load(e.data); hash := load(e.hash)
+//             if hash ^ data == key  -> valid hit
+//             else                   -> treat as miss (never wrong data)
+//
+//     store:  pack data word
+//             store(e.data, data)        // data first
+//             store(e.hash, key ^ data)  // then the self-verifying key
+//
+//   Writing data before hash means a racing reader sees (new_data,
+//   old_hash): XOR check fails -> miss.  After both writes complete,
+//   any reader sees a consistent pair.  The worst possible race
+//   outcome is a spurious miss — never a silently wrong score.
+//
+//   DATA WORD BIT LAYOUT (64 bits)
+//   --------------------------------
+//     bits  0-15  move  (int16)
+//     bits 16-31  score (int16, mate-adjusted)
+//     bits 32-39  depth (uint8)
+//     bits 40-47  bound (uint8)   UPPER=1 LOWER=2 EXACT=3
+//     bits 48-55  date  (uint8)   search generation 0-255
+//     bits 56-63  (reserved, zero)
 //
 //   REPLACEMENT POLICY
 //   ------------------
-//   For each bucket we compute an "age score": ((generation - date) * 256)
-//   + (255 - depth).  We replace the entry with the highest age score,
-//   i.e., the one that is most stale AND shallowest.  A key match
-//   always replaces the matched entry to keep data coherent.
+//   For each bucket we compute an "age score":
+//     ((generation - date) * 256) + (255 - depth)
+//   We replace the entry with the highest age score (most stale AND
+//   shallowest).  A key match always reuses the matched slot.
 //
 //   MATE SCORE ADJUSTMENT
 //   ----------------------
-//   Mate scores in alpha-beta are ply-relative: a mate in 3 from the
-//   root has a different raw score if reached at ply 2 vs ply 0.
-//   To make stored scores portable across transpositions we adjust:
-//       store: score += ply  (if mate-like, i.e. > maxEval)
-//       probe: score -= ply
-//   This converts between "distance to mate from root" and "distance
-//   to mate from this position."
+//   Mate scores are ply-relative inside the search but must be stored
+//   position-relative so they are portable across transpositions:
+//     store: if score > maxEval: score += ply   (dist from THIS position)
+//            if score < -maxEval: score -= ply
+//     probe: reverse the adjustment using the current ply.
 //
 
 package main
 
-// Entry is one slot in the transposition table.  Its size is exactly
-// 16 bytes, which keeps entries aligned in the cache.
+import "sync/atomic"
+
+// Entry is one slot in the transposition table.
+// Exactly 16 bytes (two aligned uint64s).
 type Entry struct {
-	key   uint64 // full position key for collision detection
-	date  int16  // search generation when this was stored (for aging)
-	move  int16  // best move (0 if unknown)
-	score int16  // search score (mate-adjusted)
-	bound uint8  // UPPER, LOWER, or EXACT
-	depth uint8  // remaining depth at the time of storage
+	data uint64 // packed payload (see bit layout above)
+	hash uint64 // position key XOR data (self-verifying)
 }
 
 // Global TT state.
@@ -74,16 +79,49 @@ var (
 	ttDate int     // current search generation (0-255)
 )
 
+// ---- Bit packing helpers ----
+
+func packTTData(move, score, depth, bound, date int) uint64 {
+	return uint64(uint16(int16(move))) |
+		uint64(uint16(int16(score)))<<16 |
+		uint64(uint8(depth))<<32 |
+		uint64(uint8(bound))<<40 |
+		uint64(uint8(date))<<48
+}
+
+func unpackTTData(d uint64) (move, score, depth, bound, date int) {
+	move = int(int16(d))
+	score = int(int16(d >> 16))
+	depth = int(uint8(d >> 32))
+	bound = int(uint8(d >> 40))
+	date = int(uint8(d >> 48))
+	return
+}
+
+// ---- Atomic entry access ----
+
+func loadEntry(e *Entry) (data, hash uint64) {
+	data = atomic.LoadUint64(&e.data)
+	hash = atomic.LoadUint64(&e.hash)
+	return
+}
+
+func storeEntry(e *Entry, key, data uint64) {
+	atomic.StoreUint64(&e.data, data)     // data first
+	atomic.StoreUint64(&e.hash, key^data) // then self-verifying key
+}
+
+// ---- TT management ----
+
 // allocTT allocates a transposition table of approximately mbSize
 // megabytes.  The size is rounded down to the nearest power of 2
 // so that the index mask trick works.  Always clears the table.
 func allocTT(mbSize int) {
-	// Find the largest power of 2 that fits within mbSize MB.
 	size := 2
 	for size <= mbSize {
 		size *= 2
 	}
-	// Each entry is 16 bytes; we want (size/2) MiB of entries.
+	// Each entry is 16 bytes; allocate (size/2) MiB worth.
 	ttSize = ((size / 2) << 20) / 16
 	ttMask = ttSize - 4
 	tt = make([]Entry, ttSize)
@@ -100,72 +138,62 @@ func clearTT() {
 }
 
 // ttHashfull returns TT utilization in UCI hashfull units (permille).
-// 1000 means table is fully occupied by recent searches.
 func ttHashfull() int {
 	if ttSize <= 0 {
 		return 0
 	}
-
-	// Sample the first 1000 entries (or ttSize if small)
 	sampleSize := min(ttSize, 1000)
-
 	active := 0
 	for i := 0; i < sampleSize; i++ {
-		e := &tt[i]
-		if e.key == 0 {
+		d := atomic.LoadUint64(&tt[i].data)
+		if d == 0 {
 			continue
 		}
-		// Consider an entry active if it's from the current or previous generation.
-		// Handling 8-bit wrap around using bitwise AND just like the replacement policy.
-		age := (ttDate - int(e.date)) & 255
+		_, _, _, _, date := unpackTTData(d)
+		age := (ttDate - date) & 255
 		if age <= 1 {
 			active++
 		}
 	}
-
 	return (active * 1000) / sampleSize
 }
 
+// ---- TT probe and store ----
+
 // probeTT looks up a position in the transposition table.
 //
-// If a matching entry is found at sufficient depth, *move is set to
-// the stored best move and *score is set to the stored score.
-// Returns true (and sets *score) only when the score can be used
-// directly as a cutoff, according to the bound type and alpha/beta.
-//
-// Even when the score cannot be used for an immediate cutoff, the
-// move hint is still returned so the search can try it first.
+// If a matching entry is found, *move is set to the stored best move
+// and *score is set to the stored score.  Returns true only when the
+// score can be used directly as a cutoff (depth sufficient + bound
+// matches window).  The move hint is always returned on a key match
+// so the search can try it first regardless of depth.
 func probeTT(key uint64, move *int, score *int, flag *int, ttDepth *int, alpha, beta, depth, ply int) bool {
 	base := int(key) & ttMask
 	bucket := tt[base : base+4]
 	for i := range bucket {
 		e := &bucket[i]
-		if e.key != key {
+		data, hash := loadEntry(e)
+		if hash^data != key {
 			continue
 		}
-		// Refresh the date so this entry is not considered stale.
-		e.date = int16(ttDate)
-		*move = int(e.move)
-		*flag = int(e.bound)
-		*ttDepth = int(e.depth)
+		mv, sc, dp, bd, _ := unpackTTData(data)
 
-		// Always decode the score on a key match so callers (e.g. singular
-		// extensions) can use it even when depth is insufficient for a cutoff.
-		*score = int(e.score)
-		if *score < -maxEval {
-			*score += ply
-		} else if *score > maxEval {
-			*score -= ply
+		*move = mv
+		*flag = bd
+		*ttDepth = dp
+
+		// Decode mate score to be ply-relative.
+		*score = sc
+		if sc < -maxEval {
+			*score = sc + ply
+		} else if sc > maxEval {
+			*score = sc - ply
 		}
 
-		if int(e.depth) >= depth {
-			// Use the score if it can produce a cutoff:
-			//   EXACT: always usable.
-			//   LOWER: score is a lower bound; usable when it already beats beta.
-			//   UPPER: score is an upper bound; usable when it already fails alpha.
-			if int(e.bound) == EXACT ||
-				(int(e.bound)&UPPER != 0 && *score <= alpha) ||
-				(int(e.bound)&LOWER != 0 && *score >= beta) {
+		if dp >= depth {
+			if bd == EXACT ||
+				(bd&UPPER != 0 && *score <= alpha) ||
+				(bd&LOWER != 0 && *score >= beta) {
 				return true
 			}
 		}
@@ -175,11 +203,11 @@ func probeTT(key uint64, move *int, score *int, flag *int, ttDepth *int, alpha, 
 }
 
 // storeTT writes a search result to the transposition table.
-// If the position's key already occupies a slot in the bucket, that
-// slot is reused (preserving the move hint if the new search has
-// none).  Otherwise, the oldest/shallowest entry is evicted.
+// If the position's key already occupies a slot it is reused
+// (preserving the move hint when the new search has none).
+// Otherwise the oldest/shallowest entry is evicted.
 func storeTT(key uint64, move, score, bound, depth, ply int) {
-	// Adjust mate scores to be position-relative (not ply-relative).
+	// Adjust mate scores to be position-relative.
 	if score < -maxEval {
 		score -= ply
 	} else if score > maxEval {
@@ -193,16 +221,18 @@ func storeTT(key uint64, move, score, bound, depth, ply int) {
 
 	for i := range bucket {
 		e := &bucket[i]
-		if e.key == key {
-			// Reuse the existing slot; preserve the move if we have none.
+		data, hash := loadEntry(e)
+		if hash^data == key {
+			// Reuse existing slot; preserve move if we have none.
 			if move == 0 {
-				move = int(e.move)
+				mv, _, _, _, _ := unpackTTData(data)
+				move = mv
 			}
 			replace = e
 			break
 		}
-		// Age score: prefer to replace stale, shallow entries.
-		age := ((ttDate-int(e.date))&255)*256 + (255 - int(e.depth))
+		_, _, dp, _, dt := unpackTTData(data)
+		age := ((ttDate-dt)&255)*256 + (255 - dp)
 		if age > oldest {
 			oldest = age
 			replace = e
@@ -212,11 +242,6 @@ func storeTT(key uint64, move, score, bound, depth, ply int) {
 		replace = &bucket[0]
 	}
 
-	replace.key = key
-	replace.date = int16(ttDate)
-	replace.move = int16(move)
-	replace.score = int16(score)
-	replace.bound = uint8(bound)
-	replace.depth = uint8(depth)
+	d := packTTData(move, score, depth, bound, ttDate)
+	storeEntry(replace, key, d)
 }
-
