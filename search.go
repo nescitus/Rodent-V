@@ -625,9 +625,14 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			}
 		}
 
-		// Capture piece type before makeMove — after the call the square
+		// Capture moving piece type and last capture square
+		// before makeMove — after the call the square
 		// may hold a promoted piece rather than the original pawn.
 		movedPiece := p.typeAt(moveFrom(move))
+		ss.lastCaptureSq[ply] = -1
+		if p.typeAt(moveTo(move)) != NO_TP {
+			ss.lastCaptureSq[ply] = moveTo(move)
+		}
 
 		// Copy parent into the reusable next-ply position.
 		// This includes the NNUE accumulator.
@@ -653,8 +658,14 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// Extend by one ply for moves that give check, plus singular extension.
 		newDepth := depth - 1 + extension
-		if givesCheck {
-			newDepth++
+		if isPv || depth < 12 {
+			if givesCheck {
+				newDepth++
+			} else if !isRoot {
+				if moveTo(move) == ss.lastCaptureSq[ply-1] {
+					newDepth++
+				}
+			}
 		}
 
 		// Late move pruning: skip quiet moves beyond the threshold.

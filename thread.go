@@ -50,6 +50,7 @@ type SearchState struct {
 	// ---- Heuristic tables (persist across moves of the same game) ----
 	histTable       [2][64][64]int          // butterfly history [side][from][to]
 	contHistMain    [2][6][64][2][6][64]int // continuation history
+	lastCaptureSq   [maxPly]int
 	killerMoves     [maxPly][2]int          // two killers per ply
 	moveBuffers     [maxPly]MovePicker      // pre-allocated pickers (one per ply)
 	corrHist        [2][corrHistSize]int    // pawn correction history
