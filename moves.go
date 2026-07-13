@@ -33,6 +33,28 @@
 
 package main
 
+func tryKingMove(p *Pos, move int) {
+
+	side := p.side
+	from := moveFrom(move)
+	to := moveTo(move)
+	captType := p.typeAt(to)
+
+	p.board[from] = NO_PC
+	p.board[to] = makePiece(side, K)
+	p.colorBB[side] ^= squareBit(from) | squareBit(to)
+	p.typeBB[K] ^= squareBit(from) | squareBit(to)
+
+	p.kingSq[side] = to
+
+	if captType != NO_TP {
+		p.colorBB[opp(side)] ^= squareBit(to)
+		p.typeBB[captType] ^= squareBit(to)
+	}
+
+	p.side ^= 1
+}
+
 // makeMove applies move to position p. The Update record
 // contains information about nnue update that should be
 // applied before executing any other move (or discarded

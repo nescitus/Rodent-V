@@ -417,7 +417,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 	// --- Node level pruning ---
 	// gatekeeping reverse futility pruning, razoring and null move
-	if !isPv && !nodeInCheck && !wasNull && !isMateScore(beta) {
+	if !isPv && !nodeInCheck && !wasNull && !isMateScore(beta) && kingHasLegalMove(p) {
 
 		// --- Reverse futility pruning ---
 		// If the static eval beats beta by a depth-scaled margin, the position
@@ -625,8 +625,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			}
 		}
 
-		// Capture piece type before makeMove — after the call the square
-		// may hold a promoted piece rather than the original pawn.
+		// Capture moving piece type before makeMove — after the call
+		// the square may hold a promoted piece rather than the original pawn.
 		movedPiece := p.typeAt(moveFrom(move))
 
 		// Copy parent into the reusable next-ply position.
@@ -653,6 +653,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// Extend by one ply for moves that give check, plus singular extension.
 		newDepth := depth - 1 + extension
+
 		if givesCheck {
 			newDepth++
 		}
@@ -1229,4 +1230,27 @@ func (ss *SearchState) checkTime() {
 func isMateScore(score int) bool {
 	return (score <= -mate+maxPly ||
 		score >= mate-maxPly)
+}
+
+func kingHasLegalMove(p *Pos) bool {
+	side := p.side
+	from := p.kingSq[side]
+
+	targets := kingAtk[from] &^ p.colorBB[side]
+
+	for targets != 0 {
+		to := lsb(targets)
+
+		move := (NORMAL << 12) | (to << 6) | from
+		targets &= targets - 1
+		child := *p
+
+		tryKingMove(&child, move)
+
+		if !child.selfInCheck() {
+			return true
+		}
+	}
+
+	return false
 }

@@ -39,9 +39,10 @@ const (
 	seDoubleMargin = 64 // extra centipawns below singular beta needed for a double extension
 
 	useLMP           = true
+	LMPdepth         = 9
+	useLmpTable      = true
 	LMPnormalStep    = 4
 	LMPimprovingStep = 6
-	LMPdepth         = 9
 
 	useFutility = true // cost of disabling: 20 Elo
 	fpMargin    = 120  // centipawns per depth for main-search move-loop futility pruning
@@ -54,7 +55,6 @@ const (
 	lmrMax          = 10
 	minLmrDepth     = 3
 	minLmrMove      = 4
-	useLmpTable     = true
 
 	qsFpPawnMargin  = 300 // qs futility margin when capturing a pawn (passers warrant extra slack)
 	qsFpPieceMargin = 200 // qs futility margin when capturing a piece
