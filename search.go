@@ -415,9 +415,20 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		improving = staticEval > ss.evalStack[ply-4]
 	}
 
+	// If king of the side to move has no legal moves, opponent
+	// can overcome material deficit by threatening or delivering
+	// checkmate. In this class of positions pruning the entire
+	// node may lead to tactical oversights.
+	pruningIsDangerous := false
+	if !isPv && !nodeInCheck && !wasNull && !isMateScore(beta) {
+		if !ss.kingHasLegalMove(p) {
+			pruningIsDangerous = true
+		}
+	}
+
 	// --- Node level pruning ---
 	// gatekeeping reverse futility pruning, razoring and null move
-	if !isPv && !nodeInCheck && !wasNull && !isMateScore(beta) && kingHasLegalMove(p) {
+	if !isPv && !nodeInCheck && !wasNull && !isMateScore(beta) && !pruningIsDangerous {
 
 		// --- Reverse futility pruning ---
 		// If the static eval beats beta by a depth-scaled margin, the position
@@ -1232,7 +1243,7 @@ func isMateScore(score int) bool {
 		score >= mate-maxPly)
 }
 
-func kingHasLegalMove(p *Pos) bool {
+func (ss *SearchState) kingHasLegalMove(p *Pos) bool {
 	side := p.side
 	from := p.kingSq[side]
 
