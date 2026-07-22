@@ -328,7 +328,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	if !isRoot {
 		pv[0] = 0
 
-		if ss.isRepetition(p) || p.isInsufficientMaterial() {
+		if ss.isDraw(p) {
 			ss.checkTime() // sets abort flag - helps in case of many draws in a row
 			return 0
 		}
@@ -459,7 +459,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// Skip if: depth <= 1 (too shallow to be reliable), the position
 		// is already beyond beta, we are in check, or only pawns remain.
 		// Reduction = base + depth/depthDiv + min((eval-beta)/evalDiv, maxEvalBonus).
-		if useNULL && depth >= nmpMinDepth && !isPv && p.canNullMove() && beta <= staticEval {
+		if useNULL && depth >= nmpMinDepth && p.canNullMove() && beta <= staticEval {
 
 			ss.contValid[ply] = false
 
@@ -705,7 +705,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			childAcc.applyPendingChanges(u)
 		}
 
-		// Count quiet moves
+		// Count quiet moves.
 		if stage == StageQuiet {
 			quietTried++
 		}
@@ -843,12 +843,6 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		return 0 // stalemate
 	}
 
-	// 50-move rule: only reached when there are legal moves, so checkmate
-	// and stalemate have already been handled above and take priority.
-	if !isRoot && p.clock >= 100 {
-		return 0
-	}
-
 	// Store the result in the TT with the appropriate bound type.
 	// Skip during singular extension sub-searches: their partial results
 	// (with one move excluded) must not corrupt the main TT entries.
@@ -899,7 +893,8 @@ func (ss *SearchState) quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int 
 
 	pv[0] = 0
 
-	if ss.isRepetition(p) || p.clock >= 100 || p.isInsufficientMaterial() {
+	// Draw detection.
+	if ss.isDraw(p) {
 		return 0
 	}
 
@@ -1033,8 +1028,8 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 
 	pv[0] = 0
 
-	// Draw.
-	if ss.isRepetition(p) || p.clock >= 100 || p.isInsufficientMaterial() {
+	// Draw detection.
+	if ss.isDraw(p) {
 		return 0
 	}
 
@@ -1186,6 +1181,10 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 	}
 
 	return best
+}
+
+func (ss *SearchState) isDraw(p *Pos) bool {
+	return ss.isRepetition(p) || p.isInsufficientMaterial() || p.clock >= 100
 }
 
 // isRepetition returns true if the current position is a draw by repetition.
