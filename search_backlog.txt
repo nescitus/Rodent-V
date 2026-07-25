@@ -10,15 +10,24 @@ TODO
                                         depth, 
                                         TranspositionTable::Flags::LowerBoundScore);
 - on null move cutoff, zero killers
+- testing for checkmate if 50 move rule but in check
+- see of a castle is 0
+- update conthist on tt beta cutoff
+- clean killers and excluded move for the next ply just after tt read
+- uses tt adust after hist adust
+- rfp only on non-existent or tactical tt move
 
 PASSED
 
 - if null move search gives a mate score, return beta
 - hard and soft time limits
 - don't use rfp in pawn only endings (Haka)
+- lmr of bad captures
+- checking moves get lmr reduction, but halved
 
 FAILED
 
 - no probCut after null move
 - stop searching at d5 with just one root move (not in Infinite search or while pondering)
 - tt can prevent starting a null move search
+- lmr of bad captures uses improving flag

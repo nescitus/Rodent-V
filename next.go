@@ -273,7 +273,7 @@ func initQSearch(p *Pos, m *MovePicker) {
 	m.cur = 0
 }
 
-// nextCapture returns the next good capture, or 0 when done.
+// nextCapture returns the next capture, or 0 when done.
 func (m *MovePicker) nextCapture() int {
 	for m.cur < m.end {
 		move := m.pickBest()

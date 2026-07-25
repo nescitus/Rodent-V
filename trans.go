@@ -168,29 +168,36 @@ func allocTT(mbSize int) { mainTT.alloc(mbSize) }
 func clearTT()           { mainTT.clear() }
 func ttHashfull() int    { return mainTT.hashfull() }
 
-// ---- TT probe and store ----
-
 // probe looks up a position in the transposition table.
-//
-// If a matching entry is found, *move is set to the stored best move
-// and *score is set to the stored score.  Returns true only when the
-// score can be used directly as a cutoff (depth sufficient + bound
-// matches window).  The move hint is always returned on a key match
-// so the search can try it first regardless of depth.
-func (t *TTable) probe(key uint64, move *int, score *int, flag *int, ttDepth *int, alpha, beta, depth, ply int) bool {
+func (t *TTable) probe(
+	key uint64,
+	move *int,
+	score *int,
+	flag *int,
+	ttDepth *int,
+	alpha, beta, depth, ply int,
+) bool {
+	// TT stores logical depth + 1, allowing logical depth -1.
+	requiredDepth := depth + 1
+
 	base := int(key) & t.mask
 	bucket := t.entries[base : base+4]
+
 	for i := range bucket {
 		e := &bucket[i]
 		data, hash := loadEntry(e)
+
 		if hash^data != key {
 			continue
 		}
-		mv, sc, dp, bd, _ := unpackTTData(data)
+
+		mv, sc, storedDepth, bd, _ := unpackTTData(data)
 
 		*move = mv
 		*flag = bd
-		*ttDepth = dp
+
+		// Convert stored depth back to the search's logical depth.
+		*ttDepth = storedDepth - 1
 
 		// Decode mate score to be ply-relative.
 		*score = sc
@@ -200,23 +207,25 @@ func (t *TTable) probe(key uint64, move *int, score *int, flag *int, ttDepth *in
 			*score = sc - ply
 		}
 
-		if dp >= depth {
+		if storedDepth >= requiredDepth {
 			if bd == EXACT ||
 				(bd&UPPER != 0 && *score <= alpha) ||
 				(bd&LOWER != 0 && *score >= beta) {
 				return true
 			}
 		}
+
 		break // key matched but depth or bound insufficient
 	}
+
 	return false
 }
 
 // store writes a search result to the transposition table.
-// If the position's key already occupies a slot it is reused
-// (preserving the move hint when the new search has none).
-// Otherwise the oldest/shallowest entry is evicted.
 func (t *TTable) store(key uint64, move, score, bound, depth, ply int) {
+	// TT stores logical depth + 1, allowing logical depth -1.
+	storedDepth := depth + 1
+
 	// Adjust mate scores to be position-relative.
 	if score < -maxEval {
 		score -= ply
@@ -226,32 +235,39 @@ func (t *TTable) store(key uint64, move, score, bound, depth, ply int) {
 
 	base := int(key) & t.mask
 	bucket := t.entries[base : base+4]
+
 	var replace *Entry
 	oldest := -1
 
 	for i := range bucket {
 		e := &bucket[i]
 		data, hash := loadEntry(e)
+
 		if hash^data == key {
 			// Reuse existing slot; preserve move if we have none.
 			if move == 0 {
 				mv, _, _, _, _ := unpackTTData(data)
 				move = mv
 			}
+
 			replace = e
 			break
 		}
+
 		_, _, dp, _, dt := unpackTTData(data)
+
+		// dp is already the internally encoded depth.
 		age := ((t.date-dt)&255)*256 + (255 - dp)
 		if age > oldest {
 			oldest = age
 			replace = e
 		}
 	}
+
 	if replace == nil {
 		replace = &bucket[0]
 	}
 
-	d := packTTData(move, score, depth, bound, t.date)
-	storeEntry(replace, key, d)
+	data := packTTData(move, score, storedDepth, bound, t.date)
+	storeEntry(replace, key, data)
 }

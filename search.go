@@ -440,7 +440,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		}
 
 		if useRFP && p.canNullMove() && depth <= rfpMaxDepth &&
-			beta < mate-maxPly &&
+			beta < mate-maxPly /*&& (ttMove == 0 || !isQuiet(p, ttMove))*/ &&
 			staticEval-rfpDepthMargin*depth >= beta {
 
 			return staticEval - rfpDepthMargin*depth
@@ -887,7 +887,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 	return bestScore
 }
 
-// unused
+
 func (ss *SearchState) quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int {
 	ss.nodes++
 
@@ -912,7 +912,7 @@ func (ss *SearchState) quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int 
 		return ss.staticEval(p, ply)
 	}
 
-	// TT probe: use depth=0 for all qsearch entries.
+	// TT probe: use depth=0 for quiesceCheck entries.
 	ttMove := 0
 	ttScore := 0
 	ttFlag := 0
@@ -928,6 +928,7 @@ func (ss *SearchState) quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int 
 	var childPv [maxPly]int
 
 	best := -inf
+	origAlpha := alpha
 
 	if !inCheck {
 		rawQEval := ss.staticEval(p, ply)
@@ -941,11 +942,12 @@ func (ss *SearchState) quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int 
 		if best > alpha {
 			alpha = best
 		}
-
-		initMovePicker(p, picker, ss, 0, ply)
-	} else {
-		initMovePicker(p, picker, ss, 0, ply)
 	}
+
+	bestMove := 0
+	bestScore := -inf
+
+	initMovePicker(p, picker, ss, ttMove, ply)
 
 	movesTried := 0
 
@@ -961,6 +963,28 @@ func (ss *SearchState) quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int 
 			move, _ = picker.nextCaptureOrCheck()
 			if move == 0 {
 				break
+			}
+		}
+
+		// Detect if a move gives check; If not, we try to prune it.
+		if !moveGivesCheck(p, move) {
+
+			// Prune captures that appear to lose material.
+			if isBadCapture(p, move) {
+				continue
+			}
+
+			// Prune non-queen promotions in QS.
+			if isProm(move) && moveType(move) != Q_PROM {
+				continue
+			}
+
+			// Prune moves that don't gain enough.
+			futility := optimisticMoveValue(p, move, best)
+
+			if futility <= alpha {
+				best = max(best, futility)
+				continue
 			}
 		}
 
@@ -992,7 +1016,13 @@ func (ss *SearchState) quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int 
 			return 0
 		}
 
+		if score > bestScore {
+			bestScore = score
+			bestMove = move
+		}
+
 		if score >= beta {
+			ss.tt.store(p.key, move, score, LOWER, 0, ply)
 			return score
 		}
 
@@ -1009,6 +1039,12 @@ func (ss *SearchState) quiesceCheck(p *Pos, ply, alpha, beta int, pv []int) int 
 	if inCheck && movesTried == 0 {
 		return -mate + ply
 	}
+
+	if bestScore > origAlpha {
+			ss.tt.store(p.key, bestMove, bestScore, EXACT, 0, ply)
+		} else {
+			ss.tt.store(p.key, 0, bestScore, UPPER, 0, ply)
+		}
 
 	return best
 }
@@ -1047,13 +1083,13 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		return ss.staticEval(p, ply)
 	}
 
-	// TT probe: use depth=0 for all qsearch entries.
+	// TT probe: use depth=-1 for checkless qsearch entries.
 	ttMove := 0
 	ttScore := 0
 	ttFlag := 0
 	ttDepth := 0
 
-	if ss.tt.probe(p.key, &ttMove, &ttScore, &ttFlag, &ttDepth, alpha, beta, 0, ply) {
+	if ss.tt.probe(p.key, &ttMove, &ttScore, &ttFlag, &ttDepth, alpha, beta, -1, ply) {
 		return ttScore
 	}
 
@@ -1070,7 +1106,7 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		best = rawQEval + ss.getCorrection(p)
 
 		if best >= beta {
-			ss.tt.store(p.key, 0, best, LOWER, 0, ply)
+			ss.tt.store(p.key, 0, best, LOWER, -1, ply)
 			return best
 		}
 
@@ -1099,6 +1135,7 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 				break
 			}
 
+			// Prune captures that appear to lose material.
 			if isBadCapture(p, move) {
 				continue
 			}
@@ -1108,28 +1145,8 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 				continue
 			}
 
-			// Use a higher margin for pawn captures: passers can have
-			// wildly different values so we give them extra slack.
-			var margin int
-			if moveType(move) == EP_CAP || p.typeAt(moveTo(move)) == P {
-
-				margin = qsFpPawnMargin
-			} else {
-				margin = qsFpPieceMargin
-			}
-
-			futility := best + margin
-
-			if moveType(move) == EP_CAP {
-				futility += pieceValue[P]
-			} else if p.board[moveTo(move)] != NO_PC {
-				futility += pieceValue[p.typeAt(moveTo(move))]
-			}
-
-			if isProm(move) {
-				futility += pieceValue[promType(move)] -
-					pieceValue[P]
-			}
+			// Prune moves that don't gain enough.
+			futility := optimisticMoveValue(p, move, best)
 
 			if futility <= alpha {
 				best = max(best, futility)
@@ -1190,6 +1207,31 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 	}
 
 	return best
+}
+
+func optimisticMoveValue(p *Pos, move, best int) int {
+	
+	var margin int
+	if moveType(move) == EP_CAP || p.typeAt(moveTo(move)) == P {
+
+		margin = qsFpPawnMargin
+	} else {
+		margin = qsFpPieceMargin
+	}
+
+	futility := best + margin
+
+	if moveType(move) == EP_CAP {
+		futility += pieceValue[P]
+	} else if p.board[moveTo(move)] != NO_PC {
+		futility += pieceValue[p.typeAt(moveTo(move))]
+	}
+
+	if isProm(move) {
+		futility += pieceValue[promType(move)] - pieceValue[P]
+	}
+
+	return futility
 }
 
 // isDraw detects draws in search

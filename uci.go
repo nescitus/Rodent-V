@@ -94,7 +94,7 @@ func uciLoop() {
 
 		switch tokens[0] {
 		case "uci":
-			fmt.Println("id name Rodent V s9")
+			fmt.Println("id name Rodent V s11")
 			fmt.Println("id author Naman Thanki, Pawel Koziol, based on Sungorus by Pablo Vazquez")
 			if nnue.Loaded {
 				fmt.Printf("info string Loaded NNUE network: %s\n", nnuePath)
