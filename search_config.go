@@ -35,6 +35,8 @@ const (
 
 	useSingularExt = true
 	useDoubleExt   = true
+	useNegativeExt = false
+	neReduction    = -2 // depth reduction for negative extension when multicut condition holds
 	seBetaMargin   = 6  // centipawns per ply subtracted from ttScore for singular verification
 	seDoubleMargin = 64 // extra centipawns below singular beta needed for a double extension
 
@@ -48,13 +50,19 @@ const (
 	fpMargin    = 120  // centipawns per depth for main-search move-loop futility pruning
 	fpMaxDepth  = 4    // only prune quiet moves by futility at shallow depth
 
-	useLMR          = true
-	LMRnonImproving = true
-	lmrDivisor      = 2.0
-	lmrLinear       = 1.0
-	lmrMax          = 10
-	minLmrDepth     = 3
-	minLmrMove      = 4
+	useQHP      = false
+	qhpMaxDepth = 4    // only apply quiet history pruning at shallow depths
+	qhpMargin   = 2048 // history divisor multiplier per depth squared
+
+	useLMR           = true
+	useHistoryLMR    = false
+	lmrHistoryThresh = 4096 // history score threshold (maxHist/4) to adjust LMR reduction by +/- 1
+	LMRnonImproving  = true
+	lmrDivisor       = 2.0
+	lmrLinear        = 1.0
+	lmrMax           = 10
+	minLmrDepth      = 3
+	minLmrMove       = 4
 
 	qsFpPawnMargin  = 300 // qs futility margin when capturing a pawn (passers warrant extra slack)
 	qsFpPieceMargin = 200 // qs futility margin when capturing a piece

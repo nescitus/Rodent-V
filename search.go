@@ -644,6 +644,10 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 				if useDoubleExt && !isPv && sScore < sBeta-seDoubleMargin {
 					extension = 2
 				}
+			} else if useNegativeExt && !isPv && ttScore >= beta && sScore >= sBeta {
+				// Negative extension (multicut signal): alternative search already beat our margin,
+				// proving multiple winning replies. Reduce search depth to cut off faster!
+				extension = neReduction
 			}
 		}
 
@@ -714,6 +718,15 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			continue
 		}
 
+		// Quiet history pruning: at shallow depths, skip quiet candidate moves that have
+		// demonstrated intensely negative performance histories across previous branches.
+		if useQHP && stage == StageQuiet && !isPv && !nodeInCheck && !givesCheck &&
+			ss.excludedMove[ply] == 0 && depth <= qhpMaxDepth && quietTried > 0 &&
+			ss.histTable[p.side^1][moveFrom(move)][moveTo(move)] < -qhpMargin*depth*depth {
+			ss.undoMove(p, ply)
+			continue
+		}
+
 		// Update nnue accumulator now that we know
 		// that move is legal and hasn't been pruned.
 		if ss.isUsingNNUE {
@@ -745,6 +758,16 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 				// Moves that give check are reduced half the amount.
 				if givesCheck {
 					reduction /= 2
+				}
+				// History-Informed LMR: adjust reduction based on historical success rate.
+				// Moves with strong positive history (>4096) are reduced less; proven-bad moves (< -4096) are reduced more.
+				if useHistoryLMR {
+					h := ss.histTable[p.side^1][moveFrom(move)][moveTo(move)]
+					if h > lmrHistoryThresh && reduction > 1 {
+						reduction--
+					} else if h < -lmrHistoryThresh {
+						reduction++
+					}
 				}
 				// Reduction cannot exceed actual depth.
 				if reduction > newDepth-1 {
