@@ -738,7 +738,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// LMR of quiet nodes
 		if useLMR && stage == StageQuiet && depth >= minLmrDepth &&
-			!nodeInCheck && movesTried >= 4 {
+			!nodeInCheck && movesTried >= 4 && 
+			singleOptionValue[NodesLimit] == 0 { // no LMR in weakening mode
 			// Read base reduction value.
 			reduction := lmr[min(depth, 63)][min(movesTried, 63)]
 			if reduction > 0 {
@@ -769,7 +770,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// LMR of bad captures
 		if useLMR && stage == StageBadCaptures && depth >= minLmrDepth &&
-			!nodeInCheck && !givesCheck && movesTried >= 4 {
+			!nodeInCheck && !givesCheck && movesTried >= 4 &&
+			singleOptionValue[NodesLimit] == 0 { // no LMR in weakening mode
 			reduction := 1
 			if reduction > 0 {
 				if !isPv {

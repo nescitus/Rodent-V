@@ -110,6 +110,11 @@ func main() {
 			// No return statement, we want to use Rodent like that!
 			readPersonalityFiles = false 
 
+		case "nooptions":
+			// Engine will not react to any personality options.
+			// No return statement, we want to use Rodent like that!
+			noOptions = true
+
 			// case "loadsnapshot":
 			// 	if len(os.Args) < 3 {
 			// 		fmt.Println("usage: rodent-v loadsnapshot <snapshot-file>")

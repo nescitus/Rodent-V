@@ -70,3 +70,4 @@ var lmp = [2][11]int{
 // m8
 // TEST POSITION r2q1rk1/1b3p1p/p3pPp1/2ppP3/7R/1PN1B1R1/1PP2P1P/4K3 w - - 1 3
 // info depth 26 seldepth 45 time 28206 nodes 18186988 nps 644791 hashfull 1000 score mate 8 pv h4h7 g8h7 g3h3 h7g8 e3h6 d8c7 f2f4 c7a5 h6g7 a5a1 e1d2 a1d1 c3d1 d5d4
+// r2q1r2/1b2bpkp/p3p1p1/2ppP1P1/7R/1PN1BQR1/1PP2P1P/4K3 w - - 0 1 bm Qf6

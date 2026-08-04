@@ -107,17 +107,21 @@ func uciLoop() {
 			fmt.Println("option name Clear Hash type button")
 			//fmt.Println("option name PestoEval type check default false")
 			//fmt.Println("option name Save Personality type button")
+			if !noOptions {
 			fmt.Println("option name OwnBook type check default false")
+			}
 			fmt.Println("option name Threads type spin default 1 min 1 max 256")
 			printSingleOption(NodesLimit)
 			printSingleOption(HcePerc)
 			printSingleOption(NnuePerc)
-			if (readPersonalityFiles) {
-				fmt.Println("option name PersonalityFile type string default", personalityFile)
-			} else {
-				fmt.Println("option name NnuePath type string default", nnuePath)
-				fmt.Println("option name MainBook type string default", mainBookPath)
-				fmt.Println("option name GuideBook type string default", guideBookPath)
+			if !noOptions {
+				if (readPersonalityFiles) {
+					fmt.Println("option name PersonalityFile type string default", personalityFile)
+				} else {
+					fmt.Println("option name NnuePath type string default", nnuePath)
+					fmt.Println("option name MainBook type string default", mainBookPath)
+					fmt.Println("option name GuideBook type string default", guideBookPath)
+				}
 			}
 
 			printUciOptionsPerColor()
@@ -297,6 +301,11 @@ func parseSetOption(tokens []string) {
 		return
 
 	case strings.EqualFold(name, "Save Personality"):
+
+		if noOptions {
+			return
+		}
+
 		if err := saveOptions("C:/Users/Paweł/Rodent-V-main/options.txt"); err != nil {
 			fmt.Printf("info string failed to save personality: %v\n", err)
 		} else {
@@ -305,6 +314,11 @@ func parseSetOption(tokens []string) {
 		return
 
 	case strings.EqualFold(name, "PestoEval"):
+
+		if noOptions {
+			return
+		}
+
 		if b, err := strconv.ParseBool(value); err == nil {
 			pestoEval = b
 		}
@@ -317,30 +331,55 @@ func parseSetOption(tokens []string) {
 		return
 
 	case strings.EqualFold(name, "nodesLimit"):
+
+		if noOptions {
+			return
+		}
+
 		if n, err := strconv.Atoi(value); err == nil {
 			singleOptionValue[NodesLimit] = limitValue(n, 0, 1000*1000*1000)
 		}
 		return
 
 	case strings.EqualFold(name, "nnueScale"):
+
+		if noOptions {
+			return
+		}
+
 		if n, err := strconv.Atoi(value); err == nil {
 			singleOptionValue[NnueScale] = limitValue(n, 10, 2000)
 		}
 		return
 
 	case strings.EqualFold(name, "hceWeight"):
+
+		if noOptions {
+			return
+		}
+
 		if n, err := strconv.Atoi(value); err == nil {
 			singleOptionValue[HcePerc] = limitValue(n, 0, 256)
 		}
 		return
 
 	case strings.EqualFold(name, "nnueWeight"):
+
+		if noOptions {
+			return
+		}
+
 		if n, err := strconv.Atoi(value); err == nil {
 			singleOptionValue[NnuePerc] = limitValue(n, 0, 256)
 		}
 		return
 
 	case strings.EqualFold(name, "personalityFile"):
+
+		if noOptions {
+			return
+		}
+
 		if value == "" {
 			fmt.Println("info string personality not found")
 			return
@@ -355,6 +394,11 @@ func parseSetOption(tokens []string) {
 		return
 
 	case strings.EqualFold(name, "nnuePath"):
+
+		if noOptions {
+			return
+		}
+
 		if value == "" {
 			fmt.Println("info string NNUE file path is empty")
 			return
@@ -369,6 +413,11 @@ func parseSetOption(tokens []string) {
 		return
 
 	case strings.EqualFold(name, "mainBook") || strings.EqualFold(name, "mainBookPath"):
+
+		if noOptions {
+			return
+		}
+
 		if value == "" {
 			fmt.Println("info string main book file path is empty")
 			return
@@ -382,6 +431,11 @@ func parseSetOption(tokens []string) {
 		return
 
 	case strings.EqualFold(name, "guideBook") || strings.EqualFold(name, "guideBookPath"):
+
+		if noOptions {
+			return
+		}
+
 		if value == "" {
 			fmt.Println("info string guide book file path is empty")
 			return
@@ -396,6 +450,11 @@ func parseSetOption(tokens []string) {
 		return
 		
 	case strings.EqualFold(name, "OwnBook"):
+
+		if noOptions {
+			return
+		}
+
 		ownBook = strings.EqualFold(value, "true")
 		return
 	}

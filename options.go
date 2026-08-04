@@ -27,6 +27,7 @@ import (
 	"strings"
 )
 
+var noOptions = false // prevents from changing default settings if true
 var readPersonalityFiles bool = true
 var personalityFile string // default path to personality file
 var nnuePath string      // default path to NNUE file
@@ -74,6 +75,8 @@ var engineSide int
 const weightOwn = 0
 const weightOpp = 1
 
+// 131072 nodes - 2680
+
 // default settings
 func init() {
 
@@ -85,7 +88,7 @@ func init() {
 	registerSingleOption(HcePerc, "hceWeight", 0, 0, 256, !readPersonalityFiles)
 	registerSingleOption(NnuePerc, "nnueWeight", 100, 0, 256, !readPersonalityFiles)
 	registerSingleOption(NnueScale, "nnueScale", 400, 10, 2000, !readPersonalityFiles)
-	registerSingleOption(NodesLimit, "nodesLimit", 0, 0, 1000*1000*1000, !readPersonalityFiles)
+	registerSingleOption(NodesLimit, "nodesLimit", 0, 65356, 1000*1000*1000, !readPersonalityFiles)
 	registerSingleOption(LikesClosed, "likesClosed", 0, -256, 256, !readPersonalityFiles)
 	registerSingleOption(KingTropism, "kingTropism", 0, -256, 256, !readPersonalityFiles)
 	registerSingleOption(Forwardness, "forwardness", 0, -256, 256, !readPersonalityFiles)
@@ -258,6 +261,11 @@ func readOptions(path string) error {
 
 // printUciOptionsPerColor prints color-separated options
 func printUciOptionsPerColor() {
+
+	if noOptions {
+		return
+	}
+
 	for c := EvalComponent(0); c < EvalComponentN; c++ {
 		if (!readPersonalityFiles) {
 			printPerColorOption(c)
@@ -268,6 +276,11 @@ func printUciOptionsPerColor() {
 // printPerColorOption prints option that has separate values
 // for engine's and its opponents' side
 func printPerColorOption(component EvalComponent) {
+
+	if noOptions {
+		return
+	}
+
 	fmt.Printf(
 		"option name Own%s type spin default %d min 0 max 500\n",
 		evalComponentName[component],
@@ -284,6 +297,10 @@ func printPerColorOption(component EvalComponent) {
 func setPerColorOption(name, value string) bool {
 	v, err := strconv.Atoi(value)
 	if err != nil {
+		return false
+	}
+
+	if noOptions {
 		return false
 	}
 
@@ -307,6 +324,11 @@ func setPerColorOption(name, value string) bool {
 // prints spin option applicable to both sides
 // NOTE: we are relying on Println adding spaces between arguments
 func printSingleOption(option SingleOption) {
+
+	if noOptions {
+		return
+	}
+
 	if (!readPersonalityFiles) {
 		fmt.Println(
 			"option name", singleOptionName[option],
@@ -318,6 +340,11 @@ func printSingleOption(option SingleOption) {
 }
 
 func setSingleOption(name, value string) bool {
+
+	if noOptions {
+		return false
+	}
+
 	for option := SingleOption(0); option < NofSingleOptions; option++ {
 		if !strings.EqualFold(name, singleOptionName[option]) {
 			continue

@@ -300,29 +300,26 @@ func histBonus(depth int) int {
 	return min(depth*depth+64*depth, maxHist/4)
 }
 
-// histUpdate applies a signed bonus to a history entry using the new gravity formula.
-// s += (32 * bonus) - (s * abs(bonus)) / gravityDiv
-// gravityDiv = 512 + (abs(bonus) >> 4)
-func histUpdate(entry *int, bonus int) {
-	absBonus := bonus
-	if absBonus < 0 {
-		absBonus = -absBonus
+// histUpdate applies a signed delta to a history entry using the gravity
+// formula: entry += delta - entry*|delta|/maxHist.  This keeps the value
+// inside [-maxHist, +maxHist] and lets recent signal gradually displace
+// old signal instead of accumulating without bound.
+func histUpdate(entry *int, delta int) {
+	abs := delta
+	if abs < 0 {
+		abs = -abs
 	}
-	gravityDiv := 512 + (absBonus >> 4)
-	s := *entry
-	s += (32 * bonus) - (s * absBonus) / gravityDiv
-	*entry = min(max(s, -maxHist), maxHist)
+	*entry += delta - (*entry)*abs/maxHist
 }
 
-func histUpdateInt16(entry *int16, bonus int) {
-	absBonus := bonus
-	if absBonus < 0 {
-		absBonus = -absBonus
+func histUpdateInt16(entry *int16, delta int) {
+	abs := delta
+	if abs < 0 {
+		abs = -abs
 	}
-	gravityDiv := 512 + (absBonus >> 4)
-	s := int(*entry)
-	s += (32 * bonus) - (s * absBonus) / gravityDiv
-	*entry = int16(min(max(s, -maxHist), maxHist))
+	value := int(*entry)
+	value += delta - (value)*abs/maxHist
+	*entry = int16(value)
 }
 
 // isQuiet returns true if move is a quiet move (no capture, no promotion, no EP).
