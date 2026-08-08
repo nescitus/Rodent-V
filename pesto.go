@@ -204,9 +204,7 @@ func evaluatePesto(p *Pos) int {
 	}
 
 	// Clamp phase.
-	if phase > 24 {
-		phase = 24
-	}
+	phase = minOf(phase, 24)
 
 	// Interpolate between midgame/endgame scores.
 	mgScore := mg[White] - mg[Black]
@@ -215,15 +213,8 @@ func evaluatePesto(p *Pos) int {
 
 	// Clamp to the range that the transposition table can distinguish
 	// from a forced mate score.
-	if score < -maxEval {
-		score = -maxEval
-	} else if score > maxEval {
-		score = maxEval
-	}
+	score = limitValue(score, -maxEval, maxEval)
 
 	// Return score from the perspective of the side to move.
-	if p.side == White {
-		return score
-	}
-	return -score
+	return scoreFromPerspective(score, p.side)
 }

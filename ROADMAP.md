@@ -25,7 +25,7 @@
 - [x] Doubled pawns
 - [x] Backward pawns
 - [x] King pawn shield
-- [-] Rook on 7th rank (fails with current parameters)
+- [ ] Rook on 7th rank (fails with current parameters)
 
 ---
 
@@ -97,13 +97,13 @@
 
 ## Milestone: better quiescence search
 
-- [-] Direct checking moves generator FAILED
-- [-] Discovered checks generator FAILED
+- [ ] Direct checking moves generator FAILED
+- [ ] Discovered checks generator FAILED
 - [ ] (possibly) out of check move generator
 
 ## Milestone: advanced eval params
 
-- [-] Outposts FAILED
+- [ ] Outposts FAILED
 - [ ] Pawn in front of a minor piece
 - [x] Drawish endgames
 - [ ] Material imbalances

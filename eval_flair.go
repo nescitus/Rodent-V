@@ -43,10 +43,8 @@ func flairClosed(p *Pos) int {
 		//                   initial position total: 0
 	}
 
-	var result = score[White] - score[Black]
-
 	// Return score from the perspective of the side to move.
-	return scoreFromPerspective(result, p.side)
+	return scoreFromPerspective(score[White] - score[Black], p.side)
 }
 
 // flairTropism encourages moving pieces towards enemy king.
@@ -130,11 +128,4 @@ func flairForward(p *Pos) int {
 
 func distBonus(s1, s2 int) int {
 	return 7 - chebyshev(s1, s2)
-}
-
-func scoreFromPerspective(score, side int) int {
-	if side == White {
-		return score
-	}
-	return -score
 }
