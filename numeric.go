@@ -34,3 +34,10 @@ func limitValue(value, min, max int) int {
 	}
 	return value
 }
+
+func scoreFromPerspective(score, side int) int {
+	if side == White {
+		return score
+	}
+	return -score
+}

@@ -43,7 +43,7 @@ import (
 	"strconv"
 )
 
-const versionString = "1.1"
+const versionString = "1.1.01"
 
 // init() is guaranteed to run before main()
 func init() {
@@ -112,6 +112,11 @@ func main() {
 		case "nooptions":
 			// Engine will hide all the personality options.
 			// No return statement, we want to use Rodent like that!
+			noOptions = true 
+		case "pesto":
+			// Engine will run a piece/square only eval.
+			// No return statement, we want to use Rodent like that!
+			pestoEval = true
 			noOptions = true 
 
 			// case "loadsnapshot":
