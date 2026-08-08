@@ -938,7 +938,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 				// In MultiPV mode, lines are reported together as a
 				// batch once every line has finished searching this
-				if isRoot && ss.multiPVCount <= 1 {
+				if isRoot && ss.isMainThread && ss.multiPVCount <= 1 {
 					ss.reportInfo(score, pv)
 				}
 			}

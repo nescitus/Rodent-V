@@ -69,6 +69,7 @@ func uciLoop() {
 	states := make([]*SearchState, maxAllowedThreads)
 	states[0] = new(SearchState)
 	states[0].tt = &mainTT
+	states[0].isMainThread = true
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 65536), 65536)
