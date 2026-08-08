@@ -103,6 +103,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -200,8 +201,25 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 		}(h, pCopy)
 	}
 
-	var pv [maxPly]int
-	score := 0
+	numPV := singleOptionValue[MultiPV]
+	if numPV < 1 {
+		numPV = 1
+	}
+	ss.multiPVCount = numPV
+	pvs := make([][maxPly]int, numPV)
+	scores := make([]int, numPV)
+
+	// Scratch buffers for rankPVsByScore, allocated once and reused every
+	// depth to avoid per-iteration garbage; unused (and left nil) in the
+	// default single-PV case, where there is nothing to rank.
+	var rankOrder []int
+	var rankPVsScratch [][maxPly]int
+	var rankScoresScratch []int
+	if numPV > 1 {
+		rankOrder = make([]int, numPV)
+		rankPVsScratch = make([][maxPly]int, numPV)
+		rankScoresScratch = make([]int, numPV)
+	}
 
 	var lastBestMove int
 	var bestMoveStability int
@@ -225,52 +243,80 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 				break
 			}
 		}
-		var iterScore int
+		ss.excludedRootMoves = ss.excludedRootMoves[:0] // Reset for this depth
 
-		//printMemory(rootDepth)
+		depthPVs := 0
+		for pvIdx := 0; pvIdx < numPV; pvIdx++ {
+			ss.multiPVIdx = pvIdx + 1
+			var iterScore int
 
-		if rootDepth < 5 {
-			// Aspiration windows are unreliable at shallow depths.
-			iterScore = ss.search(p, 0, -inf, inf, rootDepth, false, pv[:])
-		} else {
+			//printMemory(rootDepth)
 
-			// Score-adaptive initial delta: balanced positions get a tight
-			// window; large scores widen it to reduce retry churn.
-			delta := 25 + score*score/16384
-			alpha := max(-inf, score-delta)
-			beta := min(inf, score+delta)
+			if rootDepth < 5 {
+				// Aspiration windows are unreliable at shallow depths.
+				iterScore = ss.search(p, 0, -inf, inf, rootDepth, false, pvs[pvIdx][:])
+			} else {
+				score := scores[pvIdx]
+				// Score-adaptive initial delta: balanced positions get a tight
+				// window; large scores widen it to reduce retry churn.
+				delta := 25 + score*score/16384
+				alpha := max(-inf, score-delta)
+				beta := min(inf, score+delta)
 
-			for {
-				iterScore = ss.search(p, 0, alpha, beta, rootDepth, false, pv[:])
-				if ss.isAbortingSearch() {
-					break
+				for {
+					iterScore = ss.search(p, 0, alpha, beta, rootDepth, false, pvs[pvIdx][:])
+					if ss.isAbortingSearch() {
+						break
+					}
+					if iterScore <= alpha {
+						// Fail low: collapse beta to the midpoint before widening
+						// alpha so the high side doesn't grow unnecessarily.
+						beta = (alpha + beta) / 2
+						alpha = max(-inf, alpha-delta)
+					} else if iterScore >= beta {
+						// Fail high: widen the window above and retry.
+						beta = min(inf, beta+delta)
+					} else {
+						break // score is inside the window
+					}
+					delta += delta / 2 // proportional widening (×1.5)
 				}
-				if iterScore <= alpha {
-					// Fail low: collapse beta to the midpoint before widening
-					// alpha so the high side doesn't grow unnecessarily.
-					beta = (alpha + beta) / 2
-					alpha = max(-inf, alpha-delta)
-				} else if iterScore >= beta {
-					// Fail high: widen the window above and retry.
-					beta = min(inf, beta+delta)
-				} else {
-					break // score is inside the window
-				}
-				delta += delta / 2 // proportional widening (×1.5)
 			}
+
+			if ss.isAbortingSearch() {
+				break
+			}
+
+			// If no legal moves were found (fewer legal moves than requested PVs)
+			if pvs[pvIdx][0] == 0 {
+				break
+			}
+
+			scores[pvIdx] = iterScore
+			ss.excludedRootMoves = append(ss.excludedRootMoves, pvs[pvIdx][0])
+			depthPVs++
 		}
 
 		if ss.isAbortingSearch() {
 			break
 		}
 
-		score = iterScore
+		// In single-PV mode there is nothing to rank
+		if numPV > 1 {
+			// Rank the completed lines by score so index 0 is always the best-scoring line.
+			rankPVsByScore(pvs, scores, depthPVs, rankOrder, rankPVsScratch, rankScoresScratch)
+			// UCI requires all requested MultiPV lines to be sent together.
+			for i := 0; i < depthPVs; i++ {
+				ss.multiPVIdx = i + 1
+				ss.reportInfo(scores[i], pvs[i][:])
+			}
+		}
 
-		if pv[0] != 0 && pv[0] == lastBestMove {
+		if pvs[0][0] != 0 && pvs[0][0] == lastBestMove {
 			bestMoveStability++
 		} else {
 			bestMoveStability = 1
-			lastBestMove = pv[0]
+			lastBestMove = pvs[0][0]
 		}
 	}
 
@@ -278,10 +324,10 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 	atomic.StoreInt32(&abortFlag, 1)
 	wg.Wait()
 
-	if pv[0] != 0 {
-		best := moveToStr(pv[0])
-		if pv[1] != 0 {
-			ponder := moveToStr(pv[1])
+	if pvs[0][0] != 0 {
+		best := moveToStr(pvs[0][0])
+		if pvs[0][1] != 0 {
+			ponder := moveToStr(pvs[0][1])
 			fmt.Printf("bestmove %s ponder %s\n", best, ponder)
 		} else {
 			fmt.Printf("bestmove %s\n", best)
@@ -289,6 +335,29 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 	} else {
 		fmt.Println("bestmove 0000")
 	}
+}
+
+// rankPVsByScore reorders the first n entries of pvs/scores so they are
+// sorted by score in descending order (best line first), preserving the
+// relative order of equal scores.
+//
+// order, pvsScratch, and scoresScratch are caller-owned scratch buffers
+// (capacity >= n) reused across calls to avoid per-depth allocation.
+func rankPVsByScore(pvs [][maxPly]int, scores []int, n int, order []int, pvsScratch [][maxPly]int, scoresScratch []int) {
+	order = order[:n]
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return scores[order[i]] > scores[order[j]]
+	})
+
+	for rank, idx := range order {
+		pvsScratch[rank] = pvs[idx]
+		scoresScratch[rank] = scores[idx]
+	}
+	copy(pvs[:n], pvsScratch[:n])
+	copy(scores[:n], scoresScratch[:n])
 }
 
 func printMemory(depth int) {
@@ -610,6 +679,20 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			continue
 		}
 
+		// Skip excluded root moves for MultiPV support
+		if isRoot {
+			skip := false
+			for _, excluded := range ss.excludedRootMoves {
+				if move == excluded {
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+		}
+
 		// --- Singular extension ---
 		// When the TT move is reliable and deep enough, check if it's the
 		// only good move by searching without it at reduced depth. If all
@@ -853,7 +936,9 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 				// bestMove = move
 				buildPV(pv, childPv[:], move)
 
-				if isRoot {
+				// In MultiPV mode, lines are reported together as a
+				// batch once every line has finished searching this
+				if isRoot && ss.multiPVCount <= 1 {
 					ss.reportInfo(score, pv)
 				}
 			}
@@ -1170,8 +1255,8 @@ func (ss *SearchState) reportInfo(score int, pv []int) {
 	// Output
 	hashfull := ttHashfull()
 	if !IsBenchMode {
-		fmt.Printf("info depth %d seldepth %d time %d nodes %d nps %d hashfull %d score %s %d pv %s\n",
-			rootDepth, ss.selDepth, elapsed, ss.nodes, nps, hashfull, scoreType, score, pvString(pv))
+		fmt.Printf("info depth %d seldepth %d multipv %d time %d nodes %d nps %d hashfull %d score %s %d pv %s\n",
+			rootDepth, ss.selDepth, ss.multiPVIdx, elapsed, ss.nodes, nps, hashfull, scoreType, score, pvString(pv))
 	}
 }
 

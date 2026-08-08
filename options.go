@@ -60,6 +60,7 @@ const (
 	KingTropism
 	Forwardness
 	HorizontalMirroring
+	MultiPV
 	NofSingleOptions
 )
 
@@ -96,6 +97,7 @@ func init() {
 	registerSingleOption(KingTropism, "kingTropism", 0, -256, 256, !readPersonalityFiles)
 	registerSingleOption(Forwardness, "forwardness", 0, -256, 256, !readPersonalityFiles)
 	registerSingleOption(HorizontalMirroring, "horizontalMirroring", 1, 0, 1, !readPersonalityFiles)
+	registerSingleOption(MultiPV, "MultiPV", 1, 1, 500, !readPersonalityFiles)
 
 	pestoEval = false
 	adjustEvalByCorrhist = true

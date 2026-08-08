@@ -112,7 +112,7 @@
 
 ## Milestone: user-facing functionalities
 
-- [ ] Multi-pv
+- [x] Multi-pv
 - [ ] Weakening
 - [ ] Personalities presets
 - [ ] A tool to tune personalities without too many technical options
