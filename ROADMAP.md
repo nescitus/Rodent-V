@@ -58,7 +58,7 @@
 
 - [x] Separate options for own vs. opponent attack and mobility weights
 - [x] Define basic option list accessible for personality tuning
-- [ ] Load personalities from a text file at startup
+- [x] Load personalities from a text file
 
 ---
 
@@ -97,13 +97,13 @@
 
 ## Milestone: better quiescence search
 
-- [ ] Direct checking moves generator
-- [ ] Discovered checks generator
+- [-] Direct checking moves generator FAILED
+- [-] Discovered checks generator FAILED
 - [ ] (possibly) out of check move generator
 
 ## Milestone: advanced eval params
 
-- [ ] Outposts
+- [-] Outposts FAILED
 - [ ] Pawn in front of a minor piece
 - [x] Drawish endgames
 - [ ] Material imbalances
@@ -113,7 +113,7 @@
 ## Milestone: user-facing functionalities
 
 - [x] Multi-pv
-- [ ] Weakening
+- [x] Weakening
 - [ ] Personalities presets
 - [ ] A tool to tune personalities without too many technical options
 
