@@ -19,6 +19,8 @@ const (
 	nmpMinDepth       = 2
 	nmpBaseReduction  = 3 // base ply reduction for null-move pruning
 	nmpDepthReduction = 4 // depth divisor for depth-scaled NMP reduction
+	nmpEvalDiv        = 200
+	nmpEvalMax        = 3
 	useVerification   = false
 	minVerDepth       = 6
 	verReduction      = 4

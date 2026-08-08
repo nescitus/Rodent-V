@@ -546,11 +546,11 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// Skip if: depth <= 1 (too shallow to be reliable), the position
 		// is already beyond beta, we are in check, or only pawns remain.
 		// Reduction = base + depth/depthDiv + min((eval-beta)/evalDiv, maxEvalBonus).
-		if useNULL && depth >= nmpMinDepth && p.canNullMove() && beta <= staticEval {
+		if useNULL && depth >= nmpMinDepth && p.canNullMove() && staticEval >= beta + 30 {
 
 			ss.contValid[ply] = false
 
-			reduction := nmpBaseReduction + depth/nmpDepthReduction
+			reduction := nmpBaseReduction + depth/nmpDepthReduction + min((staticEval - beta) / nmpEvalDiv, nmpEvalMax)
 
 			// We need to prepare child accumulator, but we don't need a pointer,
 			// because null move does not change accumulator state.
