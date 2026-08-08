@@ -782,10 +782,17 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 					lmpThreshold = lmp[1][depth]
 				}
 			}
-			if useLMP && stage == StageQuiet && !isPv && !nodeInCheck && depth < LMPdepth &&
-				quietTried > lmpThreshold && !givesCheck {
-				ss.undoMove(p, ply)
-				continue
+
+			if useLMP && stage == StageQuiet && !isPv && !nodeInCheck && depth < LMPdepth && !givesCheck {
+				// History-based LMP margin adjustment
+				moveHistory := picker.value[picker.cur-1]
+				histAdj := max(-lmpHistMax, min(lmpHistMax, moveHistory / lmpHistDiv))
+				lmpThreshold += histAdj
+
+				if quietTried > lmpThreshold {
+					ss.undoMove(p, ply)
+					continue
+				}
 			}
 		}
 

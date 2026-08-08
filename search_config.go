@@ -43,6 +43,8 @@ const (
 	useLmpTable      = true
 	LMPnormalStep    = 4
 	LMPimprovingStep = 6
+	lmpHistDiv       = 4096
+	lmpHistMax       = 3
 
 	useFutility = true // cost of disabling: 20 Elo
 	fpMargin    = 120  // centipawns per depth for main-search move-loop futility pruning
