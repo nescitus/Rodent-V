@@ -400,6 +400,7 @@ func setSingleOption(name, value string) bool {
 		singleOptionValue[option] = limitValue(n,
 			singleOptionMin[option],
 			singleOptionMax[option])
+		//fmt.Printf("info string setting value %q for option %s\n", value, singleOptionName[option])
 		return true
 	}
 
