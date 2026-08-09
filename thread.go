@@ -31,11 +31,21 @@ import (
 	"time"
 )
 
+var kbnModeEverCleared bool
+
+// isKBNEndgame reports whether p is a KBN vs K position for either colour.
+func isKBNEndgame(p *Pos) bool {
+	return p.count[White][P] == 0 && p.count[Black][P] == 0 &&
+		((justBN(p, White) && justKing(p, Black)) ||
+			(justBN(p, Black) && justKing(p, White)))
+}
+
 // SearchState holds all per-thread mutable search context.
 type SearchState struct {
-	isUsingNNUE  bool
-	isMainThread bool    // true only for states[0]; lazy-SMP helpers never report UCI "info" lines
-	tt           *TTable // pointer to transposition table
+	isUsingNNUE   bool
+	kbnModeActive bool   // true while in a KBN vs K endgame; forces pure HCE
+	isMainThread  bool   // true only for states[0]; lazy-SMP helpers never report UCI "info" lines
+	tt            *TTable // pointer to transposition table
 
 	staticEval EvalFunc
 
@@ -128,6 +138,23 @@ func (ss *SearchState) resetForSearch(p *Pos) {
 	ss.excludedRootMoves = ss.excludedRootMoves[:0]
 
 	ss.isUsingNNUE = nnue.Loaded && singleOptionValue[NnuePerc] > 0
+
+	// KBN vs K: switch to pure HCE so checkmateHelper's corner-driving
+	// tables are used instead of NNUE, which has no understanding of the
+	// correct mating corner.  On the first move we enter this endgame,
+	// flush all three hash tables so stale NNUE-scored entries cannot
+	// be returned by the eval- or main-TT probes.
+	ss.kbnModeActive = isKBNEndgame(p)
+	if ss.kbnModeActive && !kbnModeEverCleared {
+		kbnModeEverCleared = true
+		clearTT()
+		clearEvalHash()
+		clearPawnHash()
+	}
+	if !ss.kbnModeActive {
+		kbnModeEverCleared = false
+	}
+
 	ss.pickEvalFunction()
 }
 
@@ -157,6 +184,14 @@ func (ss *SearchState) pickEvalFunction() {
 	if pestoEval {
 		ss.isUsingNNUE = false // side effect, needed for speed
 		ss.staticEval = ss.evalPesto
+		return
+	}
+
+	// KBN vs K: HCE has dedicated corner-driving tables (checkmateHelper),
+	// NNUE does not understand which corner to target.
+	if ss.kbnModeActive {
+		ss.isUsingNNUE = false
+		ss.staticEval = ss.evalHCE
 		return
 	}
 

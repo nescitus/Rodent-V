@@ -147,6 +147,7 @@ func uciLoop() {
 		case "ucinewgame":
 			stopSearch()
 			clearTT()
+			kbnModeEverCleared = false
 			for i := 0; i < numThreads; i++ {
 				if states[i] != nil {
 					states[i].clearHistory()
