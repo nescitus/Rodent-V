@@ -48,6 +48,10 @@ const (
 	fpMargin    = 120  // centipawns per depth for main-search move-loop futility pruning
 	fpMaxDepth  = 4    // only prune quiet moves by futility at shallow depth
 
+	useSEE         = true
+	seeQuietMargin = -60 // centipawns per depth for quiet moves
+	seeNoisyMargin = -30 // centipawns per depth for captures/promotions
+
 	useLMR          = true
 	LMRnonImproving = true
 	lmrDivisor      = 2.0

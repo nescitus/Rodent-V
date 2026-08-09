@@ -799,6 +799,18 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			continue
 		}
 
+		// SEE Pruning: prune quiet or noisy moves that lose more material than allowed by depth
+		if useSEE && !isPv && !nodeInCheck && ss.excludedMove[ply] == 0 && movesTried > 0 {
+			seeMargin := depth * seeQuietMargin
+			if stage != StageQuiet {
+				seeMargin = depth * seeNoisyMargin
+			}
+			if swap(p, moveFrom(move), moveTo(move)) < seeMargin {
+				ss.undoMove(p, ply)
+				continue
+			}
+		}
+
 		// Update nnue accumulator now that we know
 		// that move is legal and hasn't been pruned.
 		if ss.isUsingNNUE {
