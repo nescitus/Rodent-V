@@ -853,7 +853,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 					reduction = newDepth - 1
 				}
 
-				score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth-reduction, false, childPv[:], true)
+				score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth-reduction, false, childPv[:], !cutNode)
 
 				if score <= alpha {
 					isReduced = true
