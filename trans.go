@@ -62,7 +62,10 @@
 
 package main
 
-import "sync/atomic"
+import (
+	"runtime/debug"
+	"sync/atomic"
+)
 
 // Entry is one slot in the transposition table.
 // Exactly 16 bytes (two aligned uint64s).
@@ -125,11 +128,11 @@ func (t *TTable) alloc(mbSize int) {
 	}
 	// Each entry is 16 bytes; allocate (size/2) MiB worth.
 	newSize := ((size / 2) << 20) / 16
-	
+
 	if t.size == newSize {
 		return // Size unchanged, don't reallocate or wipe the TT
 	}
-	
+
 	t.size = newSize
 	t.mask = t.size - 4
 	t.entries = make([]Entry, t.size)
@@ -170,9 +173,19 @@ func (t *TTable) hashfull() int {
 	return (active * 1000) / sampleSize
 }
 
-func allocTT(mbSize int) { mainTT.alloc(mbSize) }
-func clearTT()           { mainTT.clear() }
-func ttHashfull() int    { return mainTT.hashfull() }
+func allocTT(mbSize int) {
+	mainTT.alloc(mbSize)
+	// Scale Go's soft memory limit to (Hash MB + 64MB headroom)
+	limit := int64(mbSize+64) * 1024 * 1024
+	debug.SetMemoryLimit(limit)
+}
+
+func clearTT() {
+	mainTT.clear()
+	debug.FreeOSMemory()
+}
+
+func ttHashfull() int { return mainTT.hashfull() }
 
 // ---- TT probe and store ----
 

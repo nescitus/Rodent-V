@@ -114,6 +114,10 @@ func (ss *SearchState) clearHistory() {
 	ss.nonPawnCorrHist = [2][2][corrHistSize]int16{}
 	ss.majorCorrHist = [2][2][corrHistSize]int16{}
 	ss.minorCorrHist = [2][2][corrHistSize]int16{}
+	for i := range ss.moveBuffers {
+		ss.moveBuffers[i].p = nil
+		ss.moveBuffers[i].ss = nil
+	}
 }
 
 // resetForSearch prepares ss for a new search without losing
@@ -126,6 +130,11 @@ func (ss *SearchState) resetForSearch(p *Pos) {
 	ss.rootHistLen = p.histLen
 	ss.contValid = [maxPly]bool{}
 	ss.killerMoves = [maxPly][2]int{}
+
+	for i := range ss.moveBuffers {
+		ss.moveBuffers[i].p = nil
+		ss.moveBuffers[i].ss = nil
+	}
 
 	ss.multiPVIdx = 1
 	ss.multiPVCount = 1
