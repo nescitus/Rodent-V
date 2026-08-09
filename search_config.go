@@ -55,6 +55,7 @@ const (
 	lmrMax          = 10
 	minLmrDepth     = 3
 	minLmrMove      = 4
+	cutNodeLmr      = 1
 
 	qsFpPawnMargin  = 300 // qs futility margin when capturing a pawn (passers warrant extra slack)
 	qsFpPieceMargin = 200 // qs futility margin when capturing a piece

@@ -196,7 +196,7 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 			defer wg.Done()
 			var dummyPV [maxPly]int
 			for d := 1; atomic.LoadInt32(&abortFlag) == 0; d++ {
-				hs.search(&pos, 0, -inf, inf, d, false, dummyPV[:])
+				hs.search(&pos, 0, -inf, inf, d, false, dummyPV[:], false)
 			}
 		}(h, pCopy)
 	}
@@ -254,7 +254,7 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 
 			if rootDepth < 5 {
 				// Aspiration windows are unreliable at shallow depths.
-				iterScore = ss.search(p, 0, -inf, inf, rootDepth, false, pvs[pvIdx][:])
+				iterScore = ss.search(p, 0, -inf, inf, rootDepth, false, pvs[pvIdx][:], false)
 			} else {
 				score := scores[pvIdx]
 				// Score-adaptive initial delta: balanced positions get a tight
@@ -264,7 +264,7 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 				beta := min(inf, score+delta)
 
 				for {
-					iterScore = ss.search(p, 0, alpha, beta, rootDepth, false, pvs[pvIdx][:])
+					iterScore = ss.search(p, 0, alpha, beta, rootDepth, false, pvs[pvIdx][:], false)
 					if ss.isAbortingSearch() {
 						break
 					}
@@ -385,7 +385,7 @@ func printMemory(depth int) {
 //	pv: principal variation output buffer
 //
 // Returns the score for the side to move (negamax convention).
-func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int) int {
+func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool, pv []int, cutNode bool) int {
 
 	// Quiescence search entry point
 	if depth <= 0 {
@@ -558,7 +558,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 			var nullPv [maxPly]int
 			oldEP := makeNullMove(p)
-			score = -ss.search(p, ply+1, -beta, -beta+1, depth-1-reduction, true, nullPv[:])
+			score = -ss.search(p, ply+1, -beta, -beta+1, depth-1-reduction, true, nullPv[:], !cutNode)
 			unmakeNullMove(p, oldEP)
 
 			if ss.isAbortingSearch() {
@@ -573,7 +573,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			// Null-move verification searches the original position
 			// at the same ply.
 			if useVerification && depth-reduction >= minVerDepth && score >= beta {
-				score = ss.search(p, ply, alpha, beta, depth-reduction-verReduction, true, pv)
+				score = ss.search(p, ply, alpha, beta, depth-reduction-verReduction, true, pv, false)
 
 				if ss.isAbortingSearch() {
 					return 0
@@ -629,7 +629,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 			// ProbCut re-search if quiesce returns good score
 			if score >= probcutBeta && probcutDepth > 0 {
-				score = -ss.search(p, ply+1, -probcutBeta, -probcutBeta+1, probcutDepth, false, probcutPv[:])
+				score = -ss.search(p, ply+1, -probcutBeta, -probcutBeta+1, probcutDepth, false, probcutPv[:], !cutNode)
 			}
 
 			ss.undoMove(p, ply)
@@ -718,7 +718,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 			var sePv [maxPly]int
 
-			sScore := ss.search(p, ply, sBeta-1, sBeta, (depth-1)/2, false, sePv[:])
+			sScore := ss.search(p, ply, sBeta-1, sBeta, (depth-1)/2, false, sePv[:], cutNode)
 
 			ss.excludedMove[ply] = 0
 			*picker = savedPicker
@@ -812,18 +812,17 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// --- Late move reduction ---
 		isReduced := false
+		quietStage := stage == StageQuiet
+		badCapStage := stage == StageBadCaptures
 
-		// LMR of quiet nodes
-		if useLMR && stage == StageQuiet && depth >= minLmrDepth &&
-			!nodeInCheck && movesTried >= 4 &&
+		if useLMR && depth >= minLmrDepth && (quietStage || badCapStage) &&
+			!nodeInCheck && movesTried >= minLmrMove &&
 			singleOptionValue[NodesLimit] == 0 {
-			// Read base reduction value.
-			reduction := lmr[min(depth, 63)][min(movesTried, 63)]
-			if reduction > 0 {
-				// Reduce more in zero window nodes.
-				if !isPv {
-					reduction++
-				}
+			
+			reduction := 1 // Base reduction for bad captures
+			if quietStage {
+				// Read base reduction value for quiet moves.
+				reduction = lmr[min(depth, 63)][min(movesTried, 63)]
 				// Not improving: position is trending down, reduce more aggressively.
 				if !improving && LMRnonImproving {
 					reduction++
@@ -832,34 +831,29 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 				if givesCheck {
 					reduction /= 2
 				}
+			} else {
+				// Bad captures that somehow give check should not be reduced as much
+				if givesCheck {
+					reduction = 0
+				}
+			}
+
+			if cutNode {
+				reduction += cutNodeLmr
+			}
+
+			if reduction > 0 {
+				// Reduce more in zero window nodes.
+				if !isPv {
+					reduction++
+				}
+
 				// Reduction cannot exceed actual depth.
 				if reduction > newDepth-1 {
 					reduction = newDepth - 1
 				}
 
-				score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth-reduction, false, childPv[:])
-
-				if score <= alpha {
-					isReduced = true
-				}
-			}
-		}
-
-		// LMR of bad captures
-		if useLMR && stage == StageBadCaptures && depth >= minLmrDepth &&
-			!nodeInCheck && !givesCheck && movesTried >= 4 &&
-			singleOptionValue[NodesLimit] == 0 {
-			reduction := 1
-			if reduction > 0 {
-				if !isPv {
-					reduction++
-				}
-
-				if reduction > newDepth-1 {
-					reduction = newDepth - 1
-				}
-
-				score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth-reduction, false, childPv[:])
+				score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth-reduction, false, childPv[:], !cutNode)
 
 				if score <= alpha {
 					isReduced = true
@@ -873,11 +867,11 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// only if the ZW fails high AND we are at a PV node.
 		if !isReduced {
 			if movesTried == 0 {
-				score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
+				score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:], false)
 			} else {
-				score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth, false, childPv[:])
+				score = -ss.search(p, ply+1, -alpha-1, -alpha, newDepth, false, childPv[:], !cutNode)
 				if score > alpha && isPv {
-					score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:])
+					score = -ss.search(p, ply+1, -beta, -alpha, newDepth, false, childPv[:], false)
 				}
 			}
 		}

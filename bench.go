@@ -87,7 +87,7 @@ func runBench(maxDepth int, ss *SearchState, quiet bool) {
 		
 		var dummyPV [maxPly]int
 		for d := 1; d <= maxDepth; d++ {
-			ss.search(&p, 0, -inf, inf, d, false, dummyPV[:])
+			ss.search(&p, 0, -inf, inf, d, false, dummyPV[:], false)
 		}
 		
 		if !quiet {
