@@ -328,17 +328,18 @@ func offBoard(sq int) int { return int(uint(sq) & 0x88) }
 // ZOBRIST RANDOM NUMBER GENERATOR
 // ================================================================
 //
-//   Sungorus uses a simple linear-congruential PRNG seeded at 1 to
-//   produce the Zobrist keys.  The seed matches the original C engine
-//   so that the same keys are generated, preserving hash table
-//   compatibility if you ever compare outputs.
-//
+//   Rodent uses a simple SplitMix64 PRNG seeded at 1070372 
+//   to produce the Zobrist keys. Originally it comes from 
+//   Potential.
 
-var randState uint64 = 1
+var randState uint64 = 1070372
 
 func nextRand() uint64 {
-	randState = randState*1103515245 + 12345
-	return randState
+    randState += 0x9e3779b97f4a7c15
+    z := randState
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
+    z = (z ^ (z >> 27)) * 0x94d049bb133111eb
+    return z ^ (z >> 31)
 }
 
 // ================================================================
