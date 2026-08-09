@@ -238,3 +238,10 @@ func atMostMinor(p *Pos, side int) bool {
 func atMostRook(p *Pos, side int) bool {
 	return p.count[side][N]+p.count[side][B]+p.count[side][R] < 2 && p.count[side][Q] == 0
 }
+
+
+func isKBNEndgame(p *Pos) bool {
+	return p.count[White][P] == 0 && p.count[Black][P] == 0 &&
+		((justBN(p, White) && justKing(p, Black)) ||
+			(justBN(p, Black) && justKing(p, White)))
+}

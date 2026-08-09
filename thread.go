@@ -23,7 +23,6 @@
 //   depth 1 upward, sharing results through the TT.  No work
 //   splitting or synchronisation beyond the atomic abortFlag is
 //   needed.  Typical scaling: ~1.6x at 4 threads, ~2.3x at 8.
-//
 
 package main
 
@@ -31,14 +30,9 @@ import (
 	"time"
 )
 
+// kbnModeEverCleared is set to true the first time the engine enters KBN-mode
+// within a game, so the hash flush is not repeated on every move.
 var kbnModeEverCleared bool
-
-// isKBNEndgame reports whether p is a KBN vs K position for either colour.
-func isKBNEndgame(p *Pos) bool {
-	return p.count[White][P] == 0 && p.count[Black][P] == 0 &&
-		((justBN(p, White) && justKing(p, Black)) ||
-			(justBN(p, Black) && justKing(p, White)))
-}
 
 // SearchState holds all per-thread mutable search context.
 type SearchState struct {
