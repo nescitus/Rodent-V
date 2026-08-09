@@ -109,7 +109,6 @@ func uciLoop() {
 			fmt.Printf("option name UCI_Elo type spin default %d min 800 max 3000\n", engineElo)
 
             if (!noOptions) {
-				//fmt.Println("option name PestoEval type check default false")
 				fmt.Println("option name OwnBook type check default false")
 				fmt.Println("option name Threads type spin default 1 min 1 max 256")
 				fmt.Println("option name MultiPV type spin default 1 min 1 max 500")
@@ -317,15 +316,6 @@ func parseSetOption(tokens []string) {
 		}
 		return
 
-	case strings.EqualFold(name, "PestoEval"):
-		if noOptions {
-			return
-		}
-		if b, err := strconv.ParseBool(value); err == nil {
-			pestoEval = b
-		}
-		return
-
 	case strings.EqualFold(name, "Threads"):
 		if n, err := strconv.Atoi(value); err == nil {
 			numThreads = limitValue(n, 1, 256)
@@ -343,33 +333,6 @@ func parseSetOption(tokens []string) {
 		if n, err := strconv.Atoi(value); err == nil {
 			engineElo = limitValue(n, 800, 3500)
 			configureEngineStrength()
-		}
-		return
-
-	case strings.EqualFold(name, "nnueScale"):
-		if noOptions {
-			return
-		}
-		if n, err := strconv.Atoi(value); err == nil {
-			singleOptionValue[NnueScale] = limitValue(n, 10, 2000)
-		}
-		return
-
-	case strings.EqualFold(name, "hceWeight"):
-		if noOptions {
-			return
-		}
-		if n, err := strconv.Atoi(value); err == nil {
-			singleOptionValue[HcePerc] = limitValue(n, 0, 256)
-		}
-		return
-
-	case strings.EqualFold(name, "nnueWeight"):
-		if noOptions {
-			return
-		}
-		if n, err := strconv.Atoi(value); err == nil {
-			singleOptionValue[NnuePerc] = limitValue(n, 0, 256)
 		}
 		return
 
@@ -451,7 +414,7 @@ func parseSetOption(tokens []string) {
 		return
 	}
 
-	// Parse all the single options
+	// Parse all the single (symmetric) options
 	if setSingleOption(name, value) {
 		return
 	}
