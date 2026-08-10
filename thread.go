@@ -104,6 +104,16 @@ type SearchResult struct {
 	TimeMs     int64 // wall-clock time (ms)
 }
 
+// trimIdleThreadStates releases SearchState memory for thread slots that
+// are no longer in use after numThreads has been reduced. 
+// Must only be called while no search is
+
+func trimIdleThreadStates(states []*SearchState, numThreads int) {
+	for i := numThreads; i < len(states); i++ {
+		states[i] = nil
+	}
+}
+
 // clearHistory resets all heuristic tables to zero.
 // Call on ucinewgame to prevent cross-game contamination.
 func (ss *SearchState) clearHistory() {

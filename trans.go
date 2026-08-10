@@ -65,6 +65,7 @@ package main
 import (
 	"runtime/debug"
 	"sync/atomic"
+	"unsafe"
 )
 
 // Entry is one slot in the transposition table.
@@ -83,6 +84,10 @@ type TTable struct {
 }
 
 var mainTT TTable
+
+// searchStateSize is the real per-thread memory footprint of a SearchState
+// updateMemoryLimit stays accurate.
+var searchStateSize = int64(unsafe.Sizeof(SearchState{}))
 
 // ---- Bit packing helpers ----
 
@@ -180,8 +185,19 @@ func updateMemoryLimit() {
 	if mb <= 0 {
 		mb = 16
 	}
-	limit := int64(mb+64+numThreads*2) * 1024 * 1024
-	debug.SetMemoryLimit(limit)
+	hashBytes := int64(mb) * 1024 * 1024
+	threadBytes := int64(numThreads) * searchStateSize
+	nnueBytes := int64(unsafe.Sizeof(NNUEParameters{}))
+	bookBytes := int64(len(mainBook.entries)+len(guideBook.entries)) * int64(unsafe.Sizeof(PolyglotEntry{}))
+	liveBytes := hashBytes + threadBytes + nnueBytes + bookBytes
+
+	const minHeadroomMB = 64
+	headroom := liveBytes
+	if headroom < minHeadroomMB*1024*1024 {
+		headroom = minHeadroomMB * 1024 * 1024
+	}
+
+	debug.SetMemoryLimit(liveBytes + headroom)
 }
 
 func allocTT(mbSize int) {
