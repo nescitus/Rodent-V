@@ -35,10 +35,10 @@ var timeoutTestPeriod int64 = 1023
 var noOptions = false // mode for testers, disabling options
 var readPersonalityFiles bool = true
 var personalityFile string // default path to personality file
-var nnuePath string      // default path to NNUE file
-var guideBookPath string // path to repertoire Polyglot book, default is empty
-var mainBookPath string  // path to main Polyglot book, default is empty
-var ownBook bool = false // whether to use the internal opening book
+var nnuePath string        // default path to NNUE file
+var guideBookPath string   // path to repertoire Polyglot book, default is empty
+var mainBookPath string    // path to main Polyglot book, default is empty
+var ownBook bool = false   // whether to use the internal opening book
 
 var pestoEval bool            // are we using pesto eval?
 var adjustEvalByCorrhist bool // are we using corrhist
@@ -68,7 +68,7 @@ var singleOptionName [NofSingleOptions]string
 var singleOptionValue [NofSingleOptions]int
 var singleOptionMin [NofSingleOptions]int
 var singleOptionMax [NofSingleOptions]int
-var singleOptionVisible[NofSingleOptions] bool
+var singleOptionVisible [NofSingleOptions]bool
 
 // Asymmetric, side-dependent options (EvaComponent) are defined
 // in EvalData. They need to be indexed by engine/non engine side,
@@ -84,10 +84,10 @@ const weightOpp = 1
 // default settings
 func init() {
 
-	personalityFile = "personalities/rodent.txt" 
+	personalityFile = "personalities/rodent.txt"
 	guideBookPath = "books/empty.bin"
 	mainBookPath = "books/empty.bin"
-	nnuePath = "nets/rodent_hm_512hl_1.bin"
+	nnuePath = "nets/rodent_hm_512hl_4.bin"
 
 	registerSingleOption(HcePerc, "hceWeight", 0, 0, 256, !readPersonalityFiles)
 	registerSingleOption(NnuePerc, "nnueWeight", 100, 0, 256, !readPersonalityFiles)
@@ -320,7 +320,7 @@ func readOptions(path string) error {
 // printUciOptionsPerColor prints color-separated options
 func printUciOptionsPerColor() {
 	for c := EvalComponent(0); c < EvalComponentN; c++ {
-		if (!readPersonalityFiles) {
+		if !readPersonalityFiles {
 			printPerColorOption(c)
 		}
 	}
@@ -371,7 +371,7 @@ func setPerColorOption(name, value string) bool {
 // prints spin option applicable to both sides
 // NOTE: we are relying on Println adding spaces between arguments
 func printSingleOption(option SingleOption) {
-	if (!readPersonalityFiles) {
+	if !readPersonalityFiles {
 		fmt.Println(
 			"option name", singleOptionName[option],
 			"type spin default", singleOptionValue[option],

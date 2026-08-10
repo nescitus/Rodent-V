@@ -32,7 +32,7 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-//go:embed nets/rodent_hm_512hl_1.bin
+//go:embed nets/rodent_hm_512hl_4.bin
 var embeddedNet []byte
 
 // NNUE size and scale. AVX2 code supports following net sizes:
@@ -199,7 +199,6 @@ func featureIndex(color, pt, sq, kingSq, perspective int) int {
 	}
 	return (color^perspective)*384 + pt*64 + idxSq
 }
-
 
 // Clear = empty-board state = biases only.
 func (acc *Accumulator) clear() {
