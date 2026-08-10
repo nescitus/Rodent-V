@@ -62,7 +62,11 @@
 
 package main
 
-import "sync/atomic"
+import (
+	"runtime/debug"
+	"sync/atomic"
+	"unsafe"
+)
 
 // Entry is one slot in the transposition table.
 // Exactly 16 bytes (two aligned uint64s).
@@ -80,6 +84,10 @@ type TTable struct {
 }
 
 var mainTT TTable
+
+// searchStateSize is the real per-thread memory footprint of a SearchState
+// updateMemoryLimit stays accurate.
+var searchStateSize = int64(unsafe.Sizeof(SearchState{}))
 
 // ---- Bit packing helpers ----
 
@@ -125,11 +133,11 @@ func (t *TTable) alloc(mbSize int) {
 	}
 	// Each entry is 16 bytes; allocate (size/2) MiB worth.
 	newSize := ((size / 2) << 20) / 16
-	
+
 	if t.size == newSize {
 		return // Size unchanged, don't reallocate or wipe the TT
 	}
-	
+
 	t.size = newSize
 	t.mask = t.size - 4
 	t.entries = make([]Entry, t.size)
@@ -170,9 +178,43 @@ func (t *TTable) hashfull() int {
 	return (active * 1000) / sampleSize
 }
 
-func allocTT(mbSize int) { mainTT.alloc(mbSize) }
-func clearTT()           { mainTT.clear() }
-func ttHashfull() int    { return mainTT.hashfull() }
+var currentHashMB int = 16
+
+func updateMemoryLimit() {
+	mb := currentHashMB
+	if mb <= 0 {
+		mb = 16
+	}
+	hashBytes := int64(mb) * 1024 * 1024
+	threadBytes := int64(numThreads) * searchStateSize
+	nnueBytes := int64(unsafe.Sizeof(NNUEParameters{}))
+	bookBytes := int64(len(mainBook.entries)+len(guideBook.entries)) * int64(unsafe.Sizeof(PolyglotEntry{}))
+	liveBytes := hashBytes + threadBytes + nnueBytes + bookBytes
+
+	const minHeadroomMB = 64
+	headroom := liveBytes
+	if headroom < minHeadroomMB*1024*1024 {
+		headroom = minHeadroomMB * 1024 * 1024
+	}
+
+	debug.SetMemoryLimit(liveBytes + headroom)
+}
+
+func allocTT(mbSize int) {
+	currentHashMB = mbSize
+	mainTT.alloc(mbSize)
+	updateMemoryLimit()
+}
+
+func clearTT() {
+	mainTT.clear()
+}
+
+func reclaimOSMemory() {
+	debug.FreeOSMemory()
+}
+
+func ttHashfull() int { return mainTT.hashfull() }
 
 // ---- TT probe and store ----
 

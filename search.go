@@ -100,8 +100,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"sort"
 	"sync"
@@ -716,9 +718,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 			ss.excludedMove[ply] = move
 
-			var sePv [maxPly]int
-
-			sScore := ss.search(p, ply, sBeta-1, sBeta, (depth-1)/2, false, sePv[:], cutNode)
+			sScore := ss.search(p, ply, sBeta-1, sBeta, (depth-1)/2, false, childPv[:], cutNode)
 
 			ss.excludedMove[ply] = 0
 			*picker = savedPicker
@@ -1249,8 +1249,14 @@ func (ss *SearchState) reportInfo(score int, pv []int) {
 	// Output
 	hashfull := ttHashfull()
 	if !IsBenchMode {
-		fmt.Printf("info depth %d seldepth %d multipv %d time %d nodes %d nps %d hashfull %d score %s %d pv %s\n",
-			rootDepth, ss.selDepth, ss.multiPVIdx, elapsed, ss.nodes, nps, hashfull, scoreType, score, pvString(pv))
+		buf := uciBufPool.Get().(*bytes.Buffer)
+		buf.Reset()
+		fmt.Fprintf(buf, "info depth %d seldepth %d multipv %d time %d nodes %d nps %d hashfull %d score %s %d pv ",
+			rootDepth, ss.selDepth, ss.multiPVIdx, elapsed, ss.nodes, nps, hashfull, scoreType, score)
+		writePV(buf, pv)
+		buf.WriteByte('\n')
+		os.Stdout.Write(buf.Bytes())
+		uciBufPool.Put(buf)
 	}
 }
 

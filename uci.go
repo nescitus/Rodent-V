@@ -44,10 +44,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -142,11 +144,18 @@ func uciLoop() {
 			fmt.Println("readyok")
 
 		case "setoption":
+			stopSearch()
+			prevThreads := numThreads
 			parseSetOption(tokens[1:])
+			if numThreads < prevThreads {
+				trimIdleThreadStates(states, numThreads)
+				reclaimOSMemory()
+			}
 
 		case "ucinewgame":
 			stopSearch()
 			clearTT()
+			reclaimOSMemory()
 			kbnModeEverCleared = false
 			for i := 0; i < numThreads; i++ {
 				if states[i] != nil {
@@ -304,6 +313,7 @@ func parseSetOption(tokens []string) {
 
 	case strings.EqualFold(name, "Clear Hash"):
 		clearTT()
+		reclaimOSMemory()
 		return
 
 	case strings.EqualFold(name, "Save Personality"):
@@ -320,6 +330,7 @@ func parseSetOption(tokens []string) {
 	case strings.EqualFold(name, "Threads"):
 		if n, err := strconv.Atoi(value); err == nil {
 			numThreads = limitValue(n, 1, 256)
+			updateMemoryLimit()
 		}
 		return
 
@@ -369,6 +380,7 @@ func parseSetOption(tokens []string) {
 			}
 			nnuePath = value // only correct values are saved
 			fmt.Printf("info string NNUE loaded: %s\n", value)
+			reclaimOSMemory()
 		} else {
 			fmt.Printf("info string failed to load NNUE: %s\n", value)
 		}
@@ -385,6 +397,8 @@ func parseSetOption(tokens []string) {
 
 		if initMainBook(value) {
 			mainBookPath = value
+			updateMemoryLimit()
+			reclaimOSMemory()
 		} else {
 			fmt.Printf("info string failed to load main book %q\n", value)
 		}
@@ -401,6 +415,8 @@ func parseSetOption(tokens []string) {
 
 		if initGuideBook(value) {
 			guideBookPath = value
+			updateMemoryLimit()
+			reclaimOSMemory()
 		} else {
 			fmt.Printf("info string failed to load guide book %q\n", value)
 		}
@@ -637,6 +653,37 @@ func parseMove(p *Pos, s string) int {
 		}
 	}
 	return (mt << 12) | (to << 6) | from
+}
+
+var uciBufPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
+
+func writeMove(buf *bytes.Buffer, move int) {
+	from := moveFrom(move)
+	to := moveTo(move)
+	buf.WriteByte(byte('a' + fileOf(from)))
+	buf.WriteByte(byte('1' + rankOf(from)))
+	buf.WriteByte(byte('a' + fileOf(to)))
+	buf.WriteByte(byte('1' + rankOf(to)))
+	if isProm(move) {
+		const promChars = "nbrq"
+		buf.WriteByte(promChars[(move>>12)&3])
+	}
+}
+
+func writePV(buf *bytes.Buffer, pv []int) {
+	for i, move := range pv {
+		if move == 0 {
+			break
+		}
+		if i > 0 {
+			buf.WriteByte(' ')
+		}
+		writeMove(buf, move)
+	}
 }
 
 // pvString converts a PV array to a space-separated string of UCI

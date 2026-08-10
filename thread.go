@@ -104,6 +104,16 @@ type SearchResult struct {
 	TimeMs     int64 // wall-clock time (ms)
 }
 
+// trimIdleThreadStates releases SearchState memory for thread slots that
+// are no longer in use after numThreads has been reduced. 
+// Must only be called while no search is
+
+func trimIdleThreadStates(states []*SearchState, numThreads int) {
+	for i := numThreads; i < len(states); i++ {
+		states[i] = nil
+	}
+}
+
 // clearHistory resets all heuristic tables to zero.
 // Call on ucinewgame to prevent cross-game contamination.
 func (ss *SearchState) clearHistory() {
@@ -114,6 +124,10 @@ func (ss *SearchState) clearHistory() {
 	ss.nonPawnCorrHist = [2][2][corrHistSize]int16{}
 	ss.majorCorrHist = [2][2][corrHistSize]int16{}
 	ss.minorCorrHist = [2][2][corrHistSize]int16{}
+	for i := range ss.moveBuffers {
+		ss.moveBuffers[i].p = nil
+		ss.moveBuffers[i].ss = nil
+	}
 }
 
 // resetForSearch prepares ss for a new search without losing
@@ -126,6 +140,11 @@ func (ss *SearchState) resetForSearch(p *Pos) {
 	ss.rootHistLen = p.histLen
 	ss.contValid = [maxPly]bool{}
 	ss.killerMoves = [maxPly][2]int{}
+
+	for i := range ss.moveBuffers {
+		ss.moveBuffers[i].p = nil
+		ss.moveBuffers[i].ss = nil
+	}
 
 	ss.multiPVIdx = 1
 	ss.multiPVCount = 1
