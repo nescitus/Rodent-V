@@ -149,6 +149,7 @@ func uciLoop() {
 		case "ucinewgame":
 			stopSearch()
 			clearTT()
+			reclaimOSMemory()
 			kbnModeEverCleared = false
 			for i := 0; i < numThreads; i++ {
 				if states[i] != nil {
@@ -306,6 +307,7 @@ func parseSetOption(tokens []string) {
 
 	case strings.EqualFold(name, "Clear Hash"):
 		clearTT()
+		reclaimOSMemory()
 		return
 
 	case strings.EqualFold(name, "Save Personality"):
@@ -322,6 +324,7 @@ func parseSetOption(tokens []string) {
 	case strings.EqualFold(name, "Threads"):
 		if n, err := strconv.Atoi(value); err == nil {
 			numThreads = limitValue(n, 1, 256)
+			updateMemoryLimit()
 		}
 		return
 

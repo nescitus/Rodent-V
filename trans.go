@@ -173,15 +173,28 @@ func (t *TTable) hashfull() int {
 	return (active * 1000) / sampleSize
 }
 
-func allocTT(mbSize int) {
-	mainTT.alloc(mbSize)
-	// Scale Go's soft memory limit to (Hash MB + 64MB headroom)
-	limit := int64(mbSize+64) * 1024 * 1024
+var currentHashMB int = 16
+
+func updateMemoryLimit() {
+	mb := currentHashMB
+	if mb <= 0 {
+		mb = 16
+	}
+	limit := int64(mb+64+numThreads*2) * 1024 * 1024
 	debug.SetMemoryLimit(limit)
+}
+
+func allocTT(mbSize int) {
+	currentHashMB = mbSize
+	mainTT.alloc(mbSize)
+	updateMemoryLimit()
 }
 
 func clearTT() {
 	mainTT.clear()
+}
+
+func reclaimOSMemory() {
 	debug.FreeOSMemory()
 }
 
