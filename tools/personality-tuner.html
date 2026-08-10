@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rodent V — Personality Tuner</title>
+<style>
+  :root {
+    --accent: #4a90e2;
+    --accent-dark: #3a78c2;
+    --bg: #f5f6f8;
+    --panel-bg: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b6b6b;
+    --border: #d5d8dc;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 16px; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-weight: 600;
+  }
+  .page { max-width: 640px; margin: 0 auto; background: var(--panel-bg); border-radius: 14px; padding: 28px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+  h1 { font-size: 20px; font-weight: 800; margin: 0 0 4px; }
+  .subtitle { font-weight: 500; color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 18px 0 8px; }
+
+  .preset-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .preset-btn {
+    flex: 1; min-width: 110px; font-size: 12px; text-align: center; font-weight: 700;
+    padding: 10px 8px; border-radius: 10px; cursor: pointer; position: relative;
+    border: 2px solid var(--border); background: #fafbfc; color: var(--text);
+    font-family: inherit; appearance: none; transition: all .15s;
+  }
+  .preset-btn.selected {
+    border-color: var(--accent); background: rgba(74,144,226,0.12);
+    box-shadow: 0 2px 6px rgba(74,144,226,0.3);
+  }
+
+  .slider-row { margin: 22px 0; }
+  .slider-row .top { display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 6px; }
+  .slider-row .top .left { display: flex; align-items: center; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); height: 20px; }
+
+  .summary-box {
+    font-weight: 600; font-size: 13px; line-height: 1.5; padding: 12px 14px; border-radius: 10px;
+    background: rgba(74,144,226,0.08); border-left: 4px solid var(--accent); margin: 18px 0;
+  }
+
+  .tip {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; border-radius: 50%; background: #8887; color: inherit;
+    font-size: 10px; font-weight: 800; cursor: help; margin-left: 6px; position: relative; flex-shrink: 0;
+  }
+  .tip:hover { background: var(--accent); color: #fff; }
+  .tip:hover::after {
+    content: attr(data-tip); position: absolute; bottom: 135%; left: 50%; transform: translateX(-50%);
+    background: #222; color: #fff; padding: 7px 9px; border-radius: 7px; font-size: 11px;
+    font-weight: 500; line-height: 1.4; white-space: normal; width: 190px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); z-index: 10;
+  }
+  .tip:hover::before {
+    content: ""; position: absolute; bottom: 118%; left: 50%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: #222;
+  }
+  /* preset tooltips anchor to their right edge instead of centering, so the
+     rightmost buttons don't push the tooltip box off the page */
+  .preset-btn .tip { position: absolute; top: 4px; right: 4px; }
+  .preset-btn .tip:hover::after { left: auto; right: -4px; transform: none; }
+  .preset-btn .tip:hover::before { left: auto; right: 6px; transform: none; }
+
+  .adv-toggle {
+    border: none; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    padding: 10px 2px; margin-top: 4px; width: 100%; text-align: left; background: none; font: inherit; appearance: none;
+    font-size: 13px; display: flex; align-items: center; gap: 6px; cursor: pointer;
+  }
+  .adv-panel { padding: 4px 2px 2px; margin: 4px 0; font-size: 12px; }
+  .adv-note { font-weight: 500; color: var(--muted); font-size: 11px; margin-bottom: 10px; }
+  .adv-header-row { display: flex; justify-content: flex-end; gap: 0; padding: 0 8px 4px; }
+  .adv-header-row span { width: 72px; text-align: center; font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .adv-header-row .tip { width: 12px; height: 12px; font-size: 8px; margin-left: 3px; vertical-align: middle; }
+  /* rightmost column mirrors preset-tip's right-edge anchor so its tooltip doesn't overflow the panel */
+  .adv-header-row span:last-child .tip:hover::after { left: auto; right: -4px; transform: none; }
+  .adv-header-row span:last-child .tip:hover::before { left: auto; right: 6px; transform: none; }
+  .adv-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 8px; border-radius: 6px; }
+  .adv-row:nth-child(even) { background: rgba(107,107,107,0.07); }
+  .adv-row-label { display: flex; align-items: center; font-size: 12px; font-weight: 700; }
+  .adv-range { font-weight: 500; color: var(--muted); font-size: 10px; margin-left: 6px; white-space: nowrap; }
+  .adv-row-vals { display: flex; gap: 10px; }
+  .adv-num {
+    background: transparent; color: inherit; border: none; border-bottom: 1.5px solid var(--border);
+    padding: 6px 4px; font-size: 14px; font-weight: 700; width: 72px; text-align: center;
+  }
+  .adv-num:focus { outline: none; border-bottom-color: var(--accent); }
+
+  .adv-section-toggle {
+    border: none; background: none; width: 100%; text-align: left; font: inherit; appearance: none;
+    font-size: 11px; color: var(--muted); cursor: pointer; margin: 14px 0 4px; display: flex; align-items: center; gap: 6px;
+  }
+  .path-panel { padding: 6px 8px; }
+  .path-row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+  .path-row label { width: 130px; font-size: 11px; color: var(--muted); flex-shrink: 0; }
+  .path-row input { flex: 1; font-weight: 500; font-size: 11px; }
+
+  .name-input {
+    flex: 1; font-weight: 600; padding: 12px 14px; border-radius: 8px; font-size: 14px;
+    background: #2b2d30; color: #f5f5f5; border: 1px solid #888;
+  }
+  .name-input::placeholder { color: #9a9a9a; }
+
+  .download-btn {
+    padding: 12px 20px; border-radius: 10px; border: none; font-size: 14px; font-weight: 800;
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-dark) 100%); color: #fff;
+    box-shadow: 0 3px 8px rgba(74,144,226,0.35); cursor: pointer;
+  }
+  .footer-row { display: flex; gap: 10px; margin-top: 22px; align-items: center; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Rodent V — Personality Tuner</h1>
+  <p class="subtitle">Build a custom playing style for Rodent V without touching raw engine options. Pick a starting style, adjust the sliders, download the file, drop it into your <code>personalities/</code> folder.</p>
+
+  <div class="label">1. Start from a style</div>
+  <div class="preset-row">
+    <button type="button" class="preset-btn" data-preset="balanced">⚖️ Balanced<span class="tip" data-tip="A neutral starting point — no style bias in any direction.">?</span></button>
+    <button type="button" class="preset-btn" data-preset="aggressive">⚔️ Aggressive<span class="tip" data-tip="Prioritizes attacking the opponent's king, even at some risk to its own safety.">?</span></button>
+    <button type="button" class="preset-btn" data-preset="solid">🛡️ Solid<span class="tip" data-tip="Values king safety and pawn structure over risky attacks.">?</span></button>
+    <button type="button" class="preset-btn" data-preset="chaotic">🎲 Chaotic<span class="tip" data-tip="Cuts back on structure and material for piece activity and threats — unpredictable games.">?</span></button>
+    <button type="button" class="preset-btn" data-preset="closed">🏰 Closed<span class="tip" data-tip="Prefers closed pawn structures and maneuvering over open tactical fights.">?</span></button>
+  </div>
+
+  <div class="label">2. Fine-tune</div>
+
+  <div class="slider-row">
+    <div class="top"><span class="left"><b>Aggression</b><span class="tip" data-tip="How hard it goes after the opponent's king. Higher = more attacking focus, less caring about its own king.">?</span></span><span id="val-aggression">0</span></div>
+    <input type="range" id="slider-aggression" min="-100" max="100" value="0" step="1">
+  </div>
+  <div class="slider-row">
+    <div class="top"><span class="left"><b>Risk-taking</b><span class="tip" data-tip="Willingness to give up material for the initiative or an attack.">?</span></span><span id="val-risk">0</span></div>
+    <input type="range" id="slider-risk" min="-100" max="100" value="0" step="1">
+  </div>
+  <div class="slider-row">
+    <div class="top"><span class="left"><b>Style: Closed ↔ Open</b><span class="tip" data-tip="Left = prefers open positions with lots of piece play. Right = prefers closed, maneuvering positions.">?</span></span><span id="val-style">0</span></div>
+    <input type="range" id="slider-style" min="-100" max="100" value="0" step="1">
+  </div>
+  <div class="slider-row">
+    <div class="top"><span class="left"><b>Solidity</b><span class="tip" data-tip="How much it values pawn structure and passed pawns over piece activity.">?</span></span><span id="val-solidity">0</span></div>
+    <input type="range" id="slider-solidity" min="-100" max="100" value="0" step="1">
+  </div>
+  <div class="slider-row">
+    <div class="top"><span class="left"><b>Forwardness</b><span class="tip" data-tip="How eagerly it advances pieces into the opponent's half of the board.">?</span></span><span id="val-forwardness">0</span></div>
+    <input type="range" id="slider-forwardness" min="-100" max="100" value="0" step="1">
+  </div>
+  <div class="slider-row">
+    <div class="top"><span class="left"><b>Personality Strength</b><span class="tip" data-tip="Subtle = plays close to a standard strong engine. Bold = fully commits to the style above, even at some cost to strength.">?</span></span><span id="val-strength">Bold</span></div>
+    <input type="range" id="slider-strength" min="0" max="100" value="70" step="1">
+  </div>
+
+  <div class="summary-box" id="summary-text">This personality plays a balanced, standard style.</div>
+
+  <button type="button" class="adv-toggle" id="adv-toggle"><span id="adv-arrow">▸</span> Advanced: raw engine options</button>
+
+  <div class="adv-panel hidden" id="adv-panel">
+    <div class="adv-note">Kept in sync with the sliders above. Each field is clamped to the range Rodent V accepts. Editing a field overrides just that field until you pick a preset again.</div>
+
+    <div class="adv-header-row"><span>Own<span class="tip" data-tip="Weight applied when scoring a component for the engine's own side — whichever color it's currently playing, not fixed to White.">?</span></span><span>Opp<span class="tip" data-tip="Weight applied when scoring the same component for the opponent's side — whichever color the engine is not playing, not fixed to Black.">?</span></span></div>
+
+    <div class="adv-row">
+      <div class="adv-row-label">Material<span class="tip" data-tip="Weight of piece values. Lower it if you want this personality to sacrifice material more easily.">?</span><span class="adv-range">0–500</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="0" max="500" id="adv-OwnMaterial"><input class="adv-num" type="number" min="0" max="500" id="adv-OppMaterial"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">PST<span class="tip" data-tip="Piece/square tables — reward for placing pieces on good squares. Lower for a more chaotic style.">?</span><span class="adv-range">0–500</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="0" max="500" id="adv-OwnPST"><input class="adv-num" type="number" min="0" max="500" id="adv-OppPST"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">Mobility<span class="tip" data-tip="How many legal moves a piece has. Higher rewards active, mobile pieces.">?</span><span class="adv-range">0–500</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="0" max="500" id="adv-OwnMobility"><input class="adv-num" type="number" min="0" max="500" id="adv-OppMobility"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">Safety<span class="tip" data-tip="Own = how carefully it protects its king. Opp = how much it values attacking the opponent's king.">?</span><span class="adv-range">0–500</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="0" max="500" id="adv-OwnSafety"><input class="adv-num" type="number" min="0" max="500" id="adv-OppSafety"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">Pawns<span class="tip" data-tip="Importance of pawn structure, excluding passed pawns.">?</span><span class="adv-range">0–500</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="0" max="500" id="adv-OwnPawns"><input class="adv-num" type="number" min="0" max="500" id="adv-OppPawns"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">Passers<span class="tip" data-tip="Importance of passed pawns.">?</span><span class="adv-range">0–500</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="0" max="500" id="adv-OwnPassers"><input class="adv-num" type="number" min="0" max="500" id="adv-OppPassers"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">Threats<span class="tip" data-tip="Value of attacking enemy pieces directly.">?</span><span class="adv-range">0–500</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="0" max="500" id="adv-OwnThreats"><input class="adv-num" type="number" min="0" max="500" id="adv-OppThreats"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">Other<span class="tip" data-tip="Miscellaneous smaller eval terms. Usually left at 100.">?</span><span class="adv-range">0–500</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="0" max="500" id="adv-OwnOther"><input class="adv-num" type="number" min="0" max="500" id="adv-OppOther"></div>
+    </div>
+
+    <div class="adv-row">
+      <div class="adv-row-label">likesClosed<span class="tip" data-tip="Positive = prefers closed positions. Negative = prefers open ones.">?</span><span class="adv-range">-256–256</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="-256" max="256" id="adv-likesClosed"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">kingTropism<span class="tip" data-tip="How strongly pieces are drawn toward the opponent's king.">?</span><span class="adv-range">-256–256</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="-256" max="256" id="adv-kingTropism"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">forwardness<span class="tip" data-tip="How eagerly it advances pieces into the opponent's half of the board.">?</span><span class="adv-range">-256–256</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="-256" max="256" id="adv-forwardness"></div>
+    </div>
+    <div class="adv-row">
+      <div class="adv-row-label">hceWeight / nnueWeight<span class="tip" data-tip="How much the handcrafted rules above (hceWeight) vs. the neural net (nnueWeight) count toward the final evaluation.">?</span><span class="adv-range">0–256</span></div>
+      <div class="adv-row-vals"><input class="adv-num" type="number" min="0" max="256" id="adv-hceWeight"><input class="adv-num" type="number" min="0" max="256" id="adv-nnueWeight"></div>
+    </div>
+
+    <button type="button" class="adv-section-toggle" id="path-toggle">▸ File paths &amp; misc (rarely need changing)</button>
+    <div class="path-panel hidden" id="path-panel">
+      <div class="path-row"><label>nnuePath</label><input class="name-input" id="adv-nnuePath" value="nets/rodent_hm_512hl_1.bin"></div>
+      <div class="path-row"><label>mainBookPath</label><input class="name-input" id="adv-mainBookPath" value="books/rodent.bin"></div>
+      <div class="path-row"><label>guideBookPath</label><input class="name-input" id="adv-guideBookPath" value="books/empty.bin"></div>
+      <div class="path-row"><label>nnueScale</label><input class="name-input" id="adv-nnueScale" type="number" min="10" max="2000" value="400" style="max-width:100px;"></div>
+      <div class="path-row"><label>horizontalMirroring</label><input class="name-input" id="adv-horizontalMirroring" type="number" min="0" max="1" value="1" style="max-width:70px;"></div>
+    </div>
+  </div>
+
+  <div class="footer-row">
+    <input class="name-input" id="personality-name" placeholder="my_style">
+    <button type="button" class="download-btn" id="download-btn">⬇ Download personality.txt</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+  function computeOptions(s) {
+    var o = {};
+    o.OwnThreats  = clamp(Math.round(100 + 0.3 * s.aggression), 0, 500);
+    o.OppThreats  = 100;
+    o.OppSafety   = clamp(Math.round(100 + 0.5 * s.aggression), 0, 500);
+    o.OwnSafety   = clamp(Math.round(100 - 0.2 * s.aggression), 0, 500);
+    o.kingTropism = clamp(s.aggression, -256, 256);
+
+    o.OwnMaterial = o.OppMaterial = clamp(100 - s.risk, 0, 500);
+    o.OwnPST      = o.OppPST      = clamp(100 - s.risk, 0, 500);
+    o.OwnOther    = o.OppOther    = clamp(100 - s.risk, 0, 500);
+    o.OwnMobility = clamp(Math.round(100 + 0.2 * Math.max(s.risk, 0)), 0, 500);
+
+    o.likesClosed = clamp(s.style, -256, 256);
+    o.OppMobility = clamp(Math.round(100 + 0.25 * Math.max(s.style, 0)), 0, 500);
+
+    o.OwnPawns = o.OppPawns = clamp(Math.round(100 - s.risk + 0.3 * s.solidity), 0, 500);
+    o.OwnPassers = o.OppPassers = clamp(Math.round(100 + 0.15 * s.solidity), 0, 500);
+
+    o.forwardness = clamp(s.forwardness, -256, 256);
+
+    o.hceWeight  = clamp(s.strength, 0, 256);
+    o.nnueWeight = clamp(100 - s.strength, 0, 256);
+
+    return o;
+  }
+
+  var PRESETS = {
+    balanced:   { aggression: 0,   risk: 0,   style: 0,   solidity: 0,   forwardness: 0,   strength: 70 },
+    aggressive: { aggression: 70,  risk: 40,  style: 0,   solidity: -20, forwardness: 20,  strength: 75 },
+    solid:      { aggression: -30, risk: -40, style: 20,  solidity: 50,  forwardness: -10, strength: 75 },
+    chaotic:    { aggression: 60,  risk: 90,  style: -10, solidity: -60, forwardness: 30,  strength: 60 },
+    closed:     { aggression: -10, risk: -50, style: 80,  solidity: 40,  forwardness: -20, strength: 75 }
+  };
+
+  var SUMMARY_CLAUSES = {
+    aggression:  { pos: "attacks the opponent's king aggressively", neg: 'stays cautious about attacking, focusing on solid defense' },
+    risk:        { pos: 'is willing to sacrifice material for the initiative', neg: 'avoids material risk' },
+    style:       { pos: 'prefers closed, maneuvering positions', neg: 'seeks open, tactical positions' },
+    solidity:    { pos: 'values pawn structure and passed pawns highly', neg: 'cares little about pawn structure' },
+    forwardness: { pos: 'pushes pieces boldly into the opponent\'s half', neg: 'keeps pieces close to home' }
+  };
+  var SUMMARY_ORDER = ['aggression', 'risk', 'style', 'solidity', 'forwardness'];
+
+  function buildSummary(s) {
+    var ranked = SUMMARY_ORDER
+      .map(function (k) { return { k: k, v: s[k] }; })
+      .filter(function (e) { return Math.abs(e.v) >= 15; })
+      .sort(function (a, b) { return Math.abs(b.v) - Math.abs(a.v); })
+      .slice(0, 2);
+    if (ranked.length === 0) return 'This personality plays a balanced, standard style.';
+    var parts = ranked.map(function (e) { return SUMMARY_CLAUSES[e.k][e.v > 0 ? 'pos' : 'neg']; });
+    return 'This personality ' + parts.join(' and ') + '.';
+  }
+
+  function sanitizeFilename(raw) {
+    var cleaned = String(raw || '').trim().replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    return cleaned.length > 0 ? cleaned : 'my_personality';
+  }
+
+  var FIXED = {
+    nnuePath: 'nets/rodent_hm_512hl_1.bin',
+    mainBookPath: 'books/rodent.bin',
+    guideBookPath: 'books/empty.bin',
+    nnueScale: 400,
+    horizontalMirroring: 1
+  };
+
+  var CATEGORIES = ['Material', 'PST', 'Mobility', 'Safety', 'Pawns', 'Passers', 'Threats', 'Other'];
+
+  function buildPersonalityText(o, fixed) {
+    var lines = [];
+    lines.push('; Generated by Rodent V Personality Tuner');
+    lines.push('setoption name nnuePath value ' + fixed.nnuePath);
+    lines.push('setoption name mainBookPath value ' + fixed.mainBookPath);
+    lines.push('setoption name guideBookPath value ' + fixed.guideBookPath);
+    lines.push('setoption name hceWeight value ' + o.hceWeight);
+    lines.push('setoption name nnueWeight value ' + o.nnueWeight);
+    lines.push('setoption name nnueScale value ' + fixed.nnueScale);
+    lines.push('setoption name likesClosed value ' + o.likesClosed);
+    lines.push('setoption name kingTropism value ' + o.kingTropism);
+    lines.push('setoption name forwardness value ' + o.forwardness);
+    lines.push('setoption name horizontalMirroring value ' + fixed.horizontalMirroring);
+    CATEGORIES.forEach(function (cat) {
+      lines.push('setoption name Own' + cat + ' value ' + o['Own' + cat]);
+      lines.push('setoption name Opp' + cat + ' value ' + o['Opp' + cat]);
+    });
+    return lines.join('\n') + '\n';
+  }
+
+  window.PersonalityTuner = {
+    clamp: clamp,
+    computeOptions: computeOptions,
+    PRESETS: PRESETS,
+    buildSummary: buildSummary,
+    sanitizeFilename: sanitizeFilename,
+    buildPersonalityText: buildPersonalityText,
+    FIXED: FIXED
+  };
+})();
+</script>
+<script>
+var sliderIds = ['aggression', 'risk', 'style', 'solidity', 'forwardness', 'strength'];
+var state = { aggression: 0, risk: 0, style: 0, solidity: 0, forwardness: 0, strength: 70 };
+var overridden = new Set();
+
+var OPTION_KEYS = [
+  'OwnMaterial', 'OppMaterial', 'OwnPST', 'OppPST', 'OwnMobility', 'OppMobility',
+  'OwnSafety', 'OppSafety', 'OwnPawns', 'OppPawns', 'OwnPassers', 'OppPassers',
+  'OwnThreats', 'OppThreats', 'OwnOther', 'OppOther',
+  'likesClosed', 'kingTropism', 'forwardness', 'hceWeight', 'nnueWeight'
+];
+
+function render() {
+  var computed = PersonalityTuner.computeOptions(state);
+  OPTION_KEYS.forEach(function (key) {
+    if (overridden.has(key)) return;
+    var el = document.getElementById('adv-' + key);
+    if (el) el.value = computed[key];
+  });
+  sliderIds.forEach(function (id) {
+    document.getElementById('val-' + id).textContent =
+      id === 'strength' ? (state.strength >= 50 ? 'Bold' : 'Subtle') : state[id];
+  });
+  document.getElementById('summary-text').textContent = PersonalityTuner.buildSummary(state);
+  highlightMatchingPreset();
+}
+
+function highlightMatchingPreset() {
+  document.querySelectorAll('.preset-btn').forEach(function (btn) {
+    var p = PersonalityTuner.PRESETS[btn.dataset.preset];
+    var matches = sliderIds.every(function (id) { return p[id] === state[id]; });
+    btn.classList.toggle('selected', matches);
+  });
+}
+
+sliderIds.forEach(function (id) {
+  document.getElementById('slider-' + id).addEventListener('input', function (e) {
+    state[id] = Number(e.target.value);
+    render();
+  });
+});
+
+document.querySelectorAll('.preset-btn').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var p = PersonalityTuner.PRESETS[btn.dataset.preset];
+    sliderIds.forEach(function (id) {
+      state[id] = p[id];
+      document.getElementById('slider-' + id).value = p[id];
+    });
+    overridden.clear();
+    render();
+  });
+});
+
+OPTION_KEYS.forEach(function (key) {
+  var el = document.getElementById('adv-' + key);
+  if (!el) return;
+  el.addEventListener('input', function () { overridden.add(key); });
+});
+
+document.getElementById('adv-toggle').addEventListener('click', function () {
+  var panel = document.getElementById('adv-panel');
+  var willOpen = panel.classList.contains('hidden');
+  panel.classList.toggle('hidden');
+  document.getElementById('adv-arrow').textContent = willOpen ? '▾' : '▸';
+});
+
+document.getElementById('path-toggle').addEventListener('click', function () {
+  document.getElementById('path-panel').classList.toggle('hidden');
+});
+
+document.getElementById('download-btn').addEventListener('click', function () {
+  var name = PersonalityTuner.sanitizeFilename(document.getElementById('personality-name').value);
+  var merged = PersonalityTuner.computeOptions(state);
+  OPTION_KEYS.forEach(function (key) {
+    if (!overridden.has(key)) return;
+    var el = document.getElementById('adv-' + key);
+    if (el) {
+      var n = Number(el.value);
+      if (el.value !== '' && Number.isFinite(n)) merged[key] = Math.round(n);
+    }
+  });
+  var fixed = {
+    nnuePath: document.getElementById('adv-nnuePath').value,
+    mainBookPath: document.getElementById('adv-mainBookPath').value,
+    guideBookPath: document.getElementById('adv-guideBookPath').value,
+    nnueScale: document.getElementById('adv-nnueScale').value,
+    horizontalMirroring: document.getElementById('adv-horizontalMirroring').value
+  };
+  var text = PersonalityTuner.buildPersonalityText(merged, fixed);
+  var blob = new Blob([text], { type: 'text/plain' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = name + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+render();
+</script>
+</body>
+</html>
