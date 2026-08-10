@@ -115,7 +115,7 @@
 - [x] Multi-pv
 - [x] Weakening
 - [ ] Personalities presets
-- [ ] A tool to tune personalities without too many technical options
+- [x] A tool to tune personalities without too many technical options
 
 ## Milestone: beyond standard eval
 
