@@ -144,7 +144,13 @@ func uciLoop() {
 			fmt.Println("readyok")
 
 		case "setoption":
+			stopSearch()
+			prevThreads := numThreads
 			parseSetOption(tokens[1:])
+			if numThreads < prevThreads {
+				trimIdleThreadStates(states, numThreads)
+				reclaimOSMemory()
+			}
 
 		case "ucinewgame":
 			stopSearch()
@@ -374,6 +380,7 @@ func parseSetOption(tokens []string) {
 			}
 			nnuePath = value // only correct values are saved
 			fmt.Printf("info string NNUE loaded: %s\n", value)
+			reclaimOSMemory()
 		} else {
 			fmt.Printf("info string failed to load NNUE: %s\n", value)
 		}
@@ -390,6 +397,8 @@ func parseSetOption(tokens []string) {
 
 		if initMainBook(value) {
 			mainBookPath = value
+			updateMemoryLimit()
+			reclaimOSMemory()
 		} else {
 			fmt.Printf("info string failed to load main book %q\n", value)
 		}
@@ -406,6 +415,8 @@ func parseSetOption(tokens []string) {
 
 		if initGuideBook(value) {
 			guideBookPath = value
+			updateMemoryLimit()
+			reclaimOSMemory()
 		} else {
 			fmt.Printf("info string failed to load guide book %q\n", value)
 		}
