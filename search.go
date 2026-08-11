@@ -609,9 +609,6 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 				continue
 			}
 
-			// We are about to move. Prepare NNUE accumulator for the next ply.
-			childAcc := ss.prepareChildAccumulator(ply)
-
 			// doMove() executes a move and creates pointer
 			// to data required by NNUE accumulator
 			u := ss.doMove(p, ply, move)
@@ -622,8 +619,10 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 				continue
 			}
 
-			// Update NNUE accumulator once we know that move is legal.
-			if childAcc != nil {
+			// We are about to recurse. Prepare NNUE accumulator for the next ply
+			// and update it, since we know a move is legal.
+			if ss.isUsingNNUE {
+				childAcc := ss.prepareChildAccumulator(ply)
 				childAcc.applyPendingChanges(p, u)
 			}
 
@@ -736,9 +735,6 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// the square may hold a promoted piece rather than the original pawn.
 		movedPiece := p.typeAt(moveFrom(move))
 
-		// We are about to move. Prepare NNUE accumulator for the next ply.
-		childAcc := ss.prepareChildAccumulator(ply)
-
 		// doMove() executes a move and creates pointer
 		// to data required by NNUE accumulator
 		u := ss.doMove(p, ply, move)
@@ -799,9 +795,12 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			continue
 		}
 
-		// Update nnue accumulator now that we know
+		// We are about to move. Prepare NNUE accumulator 
+		// for the next ply and update it now that we know 
 		// that move is legal and hasn't been pruned.
+
 		if ss.isUsingNNUE {
+			childAcc := ss.prepareChildAccumulator(ply)
 			childAcc.applyPendingChanges(p, u)
 		}
 
@@ -1120,9 +1119,6 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 			}
 		}
 
-		// We are about to move. Prepare NNUE accumulator for the next ply.
-		childAcc := ss.prepareChildAccumulator(ply)
-
 		// doMove() executes a move and creates pointer
 		// to data required by NNUE accumulator.
 		u := ss.doMove(p, ply, move)
@@ -1141,8 +1137,10 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		// 	break
 		// }
 
-		// Update NNUE accumulator once we know move is legal
-		if childAcc != nil {
+		// We are about to recurse. Prepare NNUE accumulator 
+		// for the next ply and update it since we know move is legal
+		if ss.isUsingNNUE {
+			childAcc := ss.prepareChildAccumulator(ply)
 			childAcc.applyPendingChanges(p, u)
 		}
 
