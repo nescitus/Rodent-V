@@ -132,3 +132,21 @@ func measureScale(path string) {
 		fmt.Println("info string No valid positions found.")
 	}
 }
+
+// Old function to adjust material and pst values. It assumes
+// we want piece/square tables zero-centered and reminder should
+// become a part of piece values.
+func printPSToffsets(pst *[6][64]int) {
+	fmt.Printf("offsets to move into material:\n")
+
+	for piece := 0; piece < 6; piece++ {
+		sum := 0
+		for sq := 0; sq < 64; sq++ {
+			sum += pst[piece][sq]
+		}
+
+		avg := float64(sum) / 64.0
+		fmt.Printf("%s: sum = %d, avg = %.3f, material correction ~= %+d\n",
+			pstLabels[piece], sum, avg, roundFloat(avg))
+	}
+}
