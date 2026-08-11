@@ -215,7 +215,10 @@ func (ss *SearchState) pickEvalFunction() {
 	}
 
 	// NNUE mode with no fluff
-	if ss.isUsingNNUE && singleOptionValue[HcePerc] == 0 {
+	if ss.isUsingNNUE && singleOptionValue[HcePerc] == 0 &&
+		singleOptionValue[LikesClosed] == 0 &&
+		singleOptionValue[KingTropism] == 0 &&
+		singleOptionValue[Forwardness] == 0 {
 		ss.staticEval = ss.evalNNUE
 		return
 	}
