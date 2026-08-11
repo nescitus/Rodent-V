@@ -168,6 +168,16 @@ func uciLoop() {
 			stopSearch()
 			parsePosition(&p, tokens[1:])
 
+		case "step":
+			stopSearch()
+
+			if len(tokens) < 2 {
+				fmt.Println("info string usage: move e2e4 [e7e5 ...]")
+				break
+			}
+
+			applyMoves(&p, tokens[1:])
+
 		case "go":
 			stopSearch()
 
@@ -450,45 +460,60 @@ func parseSetOption(tokens []string) {
 // irreversible move resets the clock, so repetition detection does
 // not look past that point.
 func parsePosition(p *Pos, tokens []string) {
-	var acc Accumulator
 	if len(tokens) == 0 {
 		return
 	}
+
 	i := 0
+
 	switch tokens[i] {
 	case "startpos":
 		parseFEN(p, startFEN)
 		i++
+
 	case "m8":
 		parseFEN(p, m8FEN)
 		i++
+
 	case "fen":
 		i++
+
 		var parts []string
 		for i < len(tokens) && tokens[i] != "moves" {
 			parts = append(parts, tokens[i])
 			i++
 		}
+
 		parseFEN(p, strings.Join(parts, " "))
 	}
 
 	if i < len(tokens) && tokens[i] == "moves" {
-		i++
-		for ; i < len(tokens); i++ {
-			move := parseMove(p, tokens[i])
-			if move == 0 {
-				break
-			}
-			var u Update
-			var r Revert
-			makeMove(p, &u, &r, move)
-			acc.applyPendingChanges(p, &u)
-			if p.clock == 0 {
-				p.histLen = 0
-			}
+		applyMoves(p, tokens[i+1:])
+	}
+}
+
+// Apply a series of moves on the board.
+func applyMoves(p *Pos, moveStrs []string) {
+	var acc Accumulator
+	refresh(p, &acc)
+
+	for _, moveStr := range moveStrs {
+		move := parseMove(p, moveStr)
+		if move == 0 {
+			fmt.Printf("info string invalid move %s\n", moveStr)
+			break
+		}
+
+		var u Update
+		var r Revert
+
+		makeMove(p, &u, &r, move)
+		acc.applyPendingChanges(p, &u)
+
+		if p.clock == 0 {
+			p.histLen = 0
 		}
 	}
-	refresh(p, &acc)
 }
 
 // ---- Time management ----
