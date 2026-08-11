@@ -83,3 +83,52 @@ func texelSigmoid(score int, k float64) float64 {
 	exponent := -(k * float64(score) / 400.0)
 	return 1.0 / (1.0 + math.Pow(10.0, exponent))
 }
+
+// measureScale measures scale of a net against a large epd set
+func measureScale(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		fmt.Println("info string Error opening file:", err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	var totalAbs int64
+	var count int64
+	var acc Accumulator
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var p Pos
+		parseFEN(&p, line)
+
+		refresh(&p, &acc)
+		eval := acc.getEval(p.side)
+
+		absEval := eval
+		if absEval < 0 {
+			absEval = -absEval
+		}
+
+		totalAbs += int64(absEval)
+		count++
+
+		if count%100000 == 0 {
+			fmt.Printf("info string Processed %d positions...\n", count)
+		}
+	}
+
+	if count > 0 {
+		absMean := float64(totalAbs) / float64(count)
+		fmt.Printf("info string Positions: %d\n", count)
+		fmt.Printf("info string Average Absolute Eval: %.2f\n", absMean)
+		fmt.Printf("info string Current NnueScale: %d\n", singleOptionValue[NnueScale])
+	} else {
+		fmt.Println("info string No valid positions found.")
+	}
+}
