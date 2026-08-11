@@ -32,7 +32,7 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-//go:embed nets/rodent_hm_512hl_8ob.bin
+//go:embed nets/rodent_ck_v3_8ob_512hl.bin
 var embeddedNet []byte
 
 // NNUE size and scale. AVX2 code supports following net sizes:
@@ -43,6 +43,10 @@ const (
 	OutputBuckets  = 8
 	NNUEL0Scale    = 255
 	NNUEL1Scale    = 64
+
+	// Minimum parameter byte sizes for 1-bucket and 8-bucket network blobs (2 bytes per int16)
+	SingleBucketNetSize = (NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + 2*NNUEHiddenSize + 1) * 2
+	OutputBucketNetSize = (NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + OutputBuckets*2*NNUEHiddenSize + OutputBuckets) * 2
 )
 
 // Types of NNUE updates
@@ -569,7 +573,7 @@ func (acc *Accumulator) getEval(p *Pos, stm int) int {
 }
 
 func nnueLoadFromBytes(data []byte) bool {
-	if len(data) < 789506 {
+	if len(data) < SingleBucketNetSize {
 		nnue.Loaded = false
 		return false
 	}
@@ -597,7 +601,7 @@ func nnueLoadFromBytes(data []byte) bool {
 	}
 
 	// 8 Output Buckets vs Single Output Bucket
-	if len(data) >= 803856 {
+	if len(data) >= OutputBucketNetSize {
 		for b := 0; b < OutputBuckets; b++ {
 			for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
 				nnueParams.OutputWeights[b][0][neuron] = readI16()
