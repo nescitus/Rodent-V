@@ -183,20 +183,20 @@ func evaluateNNUE(p *Pos, acc *Accumulator) int {
 }
 
 // returns NNUE eval after all the scalings we apply
-func evaluateScaledNNUE(p *Pos, acc *Accumulator)int {
+func evaluateScaledNNUE(p *Pos, acc *Accumulator) int {
 
 	// sum of material for both sides
-	material := 100 * p.count[White][P] + 100 * p.count[Black][P] + 
-				300 * p.count[White][N] + 300 * p.count[Black][N] + 
-				300 * p.count[White][B] + 300 * p.count[White][R] + 
-				500 * p.count[White][R] + 500 * p.count[Black][R] + 
-				900 * p.count[White][Q] + 900 * p.count[Black][Q]
+	material := 100*p.count[White][P] + 100*p.count[Black][P] +
+		300*p.count[White][N] + 300*p.count[Black][N] +
+		300*p.count[White][B] + 300*p.count[Black][B] +
+		500*p.count[White][R] + 500*p.count[Black][R] +
+		900*p.count[White][Q] + 900*p.count[Black][Q]
 
 	// percentage scaling
 	score := acc.getEval(p, p.side) * singleOptionValue[NnuePerc] / 100
 
 	// decrease score as material disappears
-	return score * (25000 + material) / 32768;
+	return score * (25000 + material) / 32768
 }
 
 // eval_trace describes engine's hce evaluation

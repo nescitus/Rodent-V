@@ -91,7 +91,7 @@ func init() {
 
 	registerSingleOption(HcePerc, "hceWeight", 0, 0, 256, !readPersonalityFiles)
 	registerSingleOption(NnuePerc, "nnueWeight", 100, 0, 256, !readPersonalityFiles)
-	registerSingleOption(NnueScale, "nnueScale", 400, 10, 2000, !readPersonalityFiles)
+	registerSingleOption(NnueScale, "nnueScale", 192, 10, 2000, !readPersonalityFiles)
 	registerSingleOption(NodesLimit, "nodesLimit", 0, 0, 1000*1000*1000, false) // set by Uci_Elo
 	registerSingleOption(LikesClosed, "likesClosed", 0, -256, 256, !readPersonalityFiles)
 	registerSingleOption(KingTropism, "kingTropism", 0, -256, 256, !readPersonalityFiles)
