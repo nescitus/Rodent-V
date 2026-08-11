@@ -41,3 +41,10 @@ func scoreFromPerspective(score, side int) int {
 	}
 	return -score
 }
+
+func roundFloat(x float64) int {
+	if x >= 0 {
+		return int(x + 0.5)
+	}
+	return int(x - 0.5)
+}
