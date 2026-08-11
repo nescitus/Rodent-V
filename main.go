@@ -108,16 +108,16 @@ func main() {
 		case "alloptions":
 			// Engine will hide personality path and print UCI options.
 			// No return statement, we want to use Rodent like that!
-			readPersonalityFiles = false 
+			readPersonalityFiles = false
 		case "nooptions":
 			// Engine will hide all the personality options.
 			// No return statement, we want to use Rodent like that!
-			noOptions = true 
+			noOptions = true
 		case "pesto":
 			// Engine will run a piece/square only eval.
 			// No return statement, we want to use Rodent like that!
 			pestoEval = true
-			noOptions = true 
+			noOptions = true
 
 			// case "loadsnapshot":
 			// 	if len(os.Args) < 3 {

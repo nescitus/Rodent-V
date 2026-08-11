@@ -37,8 +37,8 @@ var kbnModeEverCleared bool
 // SearchState holds all per-thread mutable search context.
 type SearchState struct {
 	isUsingNNUE   bool
-	kbnModeActive bool   // true while in a KBN vs K endgame; forces pure HCE
-	isMainThread  bool   // true only for states[0]; lazy-SMP helpers never report UCI "info" lines
+	kbnModeActive bool    // true while in a KBN vs K endgame; forces pure HCE
+	isMainThread  bool    // true only for states[0]; lazy-SMP helpers never report UCI "info" lines
 	tt            *TTable // pointer to transposition table
 
 	staticEval EvalFunc
@@ -48,6 +48,7 @@ type SearchState struct {
 	nodesLimit  int64 // max nodes to search before aborting (0 = no limit)
 	selDepth    int   // maximum ply reached this search
 	searchStart int64 // Unix ms at the start of think()
+	rootDepth   int   // current iterative deepening depth
 	rootHistLen int   // p.histLen when think() began (repetition detection)
 
 	// ---- MultiPV State ----
@@ -105,7 +106,7 @@ type SearchResult struct {
 }
 
 // trimIdleThreadStates releases SearchState memory for thread slots that
-// are no longer in use after numThreads has been reduced. 
+// are no longer in use after numThreads has been reduced.
 // Must only be called while no search is
 
 func trimIdleThreadStates(states []*SearchState, numThreads int) {

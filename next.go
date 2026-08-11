@@ -310,7 +310,7 @@ func histUpdate(entry *int, bonus int) {
 	}
 	gravityDiv := 512 + (absBonus >> 4)
 	s := *entry
-	s += (32 * bonus) - (s * absBonus) / gravityDiv
+	s += (32 * bonus) - (s*absBonus)/gravityDiv
 	*entry = min(max(s, -maxHist), maxHist)
 }
 
@@ -321,7 +321,7 @@ func histUpdateInt16(entry *int16, bonus int) {
 	}
 	gravityDiv := 512 + (absBonus >> 4)
 	s := int(*entry)
-	s += (32 * bonus) - (s * absBonus) / gravityDiv
+	s += (32 * bonus) - (s*absBonus)/gravityDiv
 	*entry = int16(min(max(s, -maxHist), maxHist))
 }
 

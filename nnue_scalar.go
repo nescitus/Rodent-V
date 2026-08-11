@@ -3,14 +3,14 @@ package main
 import "unsafe"
 
 func addSingleScalar(
-    a, w *int16,
+	a, w *int16,
 ) {
-    acc := unsafe.Slice(a, NNUEHiddenSize)
-    ww := unsafe.Slice(w, NNUEHiddenSize)
+	acc := unsafe.Slice(a, NNUEHiddenSize)
+	ww := unsafe.Slice(w, NNUEHiddenSize)
 
-    for i := 0; i < NNUEHiddenSize; i++ {
-        acc[i] += ww[i]
-    }
+	for i := 0; i < NNUEHiddenSize; i++ {
+		acc[i] += ww[i]
+	}
 }
 
 func addScalar(

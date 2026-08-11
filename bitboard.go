@@ -71,45 +71,45 @@ func fillSouth(b uint64) uint64 {
 }
 
 func fillWest(b uint64) uint64 {
-   pr0 := excludeH;
-   pr1 := pr0 & (pr0 >> 1);
-   pr2 := pr1 & (pr1 >> 2);
-   b |= pr0 & (b >> 1);
-   b |= pr1 & (b >> 2);
-   b |= pr2 & (b >> 4);
-   return b;
+	pr0 := excludeH
+	pr1 := pr0 & (pr0 >> 1)
+	pr2 := pr1 & (pr1 >> 2)
+	b |= pr0 & (b >> 1)
+	b |= pr1 & (b >> 2)
+	b |= pr2 & (b >> 4)
+	return b
 }
 
 func fillEast(b uint64) uint64 {
-   pr0 := excludeA;
-   pr1 := pr0 & (pr0 << 1);
-   pr2 := pr1 & (pr1 << 2);
-   b |= pr0 & (b  << 1);
-   b |= pr1 & (b  << 2);
-   b |= pr2 & (b  << 4);
-   return b;
+	pr0 := excludeA
+	pr1 := pr0 & (pr0 << 1)
+	pr2 := pr1 & (pr1 << 2)
+	b |= pr0 & (b << 1)
+	b |= pr1 & (b << 2)
+	b |= pr2 & (b << 4)
+	return b
 }
 
 func fillSideways(b uint64) uint64 {
-	return fillEast(shiftEast(b)) |  fillWest(shiftWest(b)) 
+	return fillEast(shiftEast(b)) | fillWest(shiftWest(b))
 }
 
 // color-dependent forward fill
 func fillForward(b uint64, color int) uint64 {
 
-    if color == White {
-		return fillNorth(shiftNorth(b)) 
-	} 
-    return fillSouth(shiftSouth(b))
+	if color == White {
+		return fillNorth(shiftNorth(b))
+	}
+	return fillSouth(shiftSouth(b))
 }
 
 // color-dependent backward fill
 func fillBackward(b uint64, color int) uint64 {
 
-    if color == Black {
-		return fillNorth(shiftNorth(b)) 
-	} 
-    return fillSouth(shiftSouth(b))
+	if color == Black {
+		return fillNorth(shiftNorth(b))
+	}
+	return fillSouth(shiftSouth(b))
 }
 
 func PrintBitboard(bb uint64) {

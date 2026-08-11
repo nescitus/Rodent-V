@@ -84,12 +84,13 @@ func runBench(maxDepth int, ss *SearchState, quiet bool) {
 
 		ss.resetForSearch(&p)
 		refresh(&p, &ss.accStack[0])
-		
+
 		var dummyPV [maxPly]int
 		for d := 1; d <= maxDepth; d++ {
+			ss.rootDepth = d
 			ss.search(&p, 0, -inf, inf, d, false, dummyPV[:], false)
 		}
-		
+
 		if !quiet {
 			fmt.Printf("Position %d/50: %s\n", i+1, fen)
 			fmt.Printf(" -> %d nodes\n", ss.nodes)

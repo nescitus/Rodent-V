@@ -319,8 +319,8 @@ func computeMinorKey(p *Pos, side int) uint64 {
 	var key uint64
 	for sq := 0; sq < 64; sq++ {
 		pc := p.board[sq]
-		if pc != NO_PC && colorOf(pc) == side && 
-		(typeOf(pc) == N || typeOf(pc) == B || typeOf(pc) == K)  {
+		if pc != NO_PC && colorOf(pc) == side &&
+			(typeOf(pc) == N || typeOf(pc) == B || typeOf(pc) == K) {
 			key ^= zobPiece[pc][sq]
 		}
 	}
@@ -331,8 +331,8 @@ func computeMajorKey(p *Pos, side int) uint64 {
 	var key uint64
 	for sq := 0; sq < 64; sq++ {
 		pc := p.board[sq]
-		if pc != NO_PC && colorOf(pc) == side && 
-		(typeOf(pc) == R || typeOf(pc) == Q || typeOf(pc) == K)  {
+		if pc != NO_PC && colorOf(pc) == side &&
+			(typeOf(pc) == R || typeOf(pc) == Q || typeOf(pc) == K) {
 			key ^= zobPiece[pc][sq]
 		}
 	}

@@ -140,13 +140,14 @@ func uciLoop() {
 			fmt.Println("uciok")
 
 		case "isready":
-			stopSearch()
 			fmt.Println("readyok")
 
 		case "setoption":
 			stopSearch()
 			prevThreads := numThreads
 			parseSetOption(tokens[1:])
+			clearEvalHash()
+			clearPawnHash()
 			if numThreads < prevThreads {
 				trimIdleThreadStates(states, numThreads)
 				reclaimOSMemory()
@@ -195,12 +196,19 @@ func uciLoop() {
 				st, mt, md := parseGoParams(tokens[1:], &p)
 				softTimeLimit = st
 				hardTimeLimit = mt
-				pondering = false
+				isPondering := false
 				for _, t := range tokens[1:] {
 					if t == "ponder" {
-						pondering = true
+						isPondering = true
 						break
 					}
+				}
+				if isPondering {
+					atomic.StoreInt64(&timeLimitStart, 0)
+					atomic.StoreInt32(&pondering, 1)
+				} else {
+					atomic.StoreInt64(&timeLimitStart, time.Now().UnixMilli())
+					atomic.StoreInt32(&pondering, 0)
 				}
 				posForSearch := p // copy: the search owns its own position
 				searchDone = make(chan struct{})
@@ -214,8 +222,11 @@ func uciLoop() {
 
 		case "ponderhit":
 			// The move we were pondering was played. Switch from
-			// unlimited ponder mode to normal time control.
-			pondering = false
+			// unlimited ponder mode to a fresh normal time budget.
+			if atomic.LoadInt32(&pondering) != 0 {
+				atomic.StoreInt64(&timeLimitStart, time.Now().UnixMilli())
+				atomic.StoreInt32(&pondering, 0)
+			}
 
 		case "quit":
 			stopSearch()

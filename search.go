@@ -114,12 +114,12 @@ import (
 // Global search state — shared across all threads.
 // Per-thread state lives in SearchState (see thread.go).
 var (
-	softTimeLimit int64     // allocated soft move time in ms; stop between iterations
-	hardTimeLimit int64     // allocated hard move time in ms (-1 = unlimited); drop-dead limit
-	pondering     bool      // true while in ponder mode (ignore clock)
-	rootDepth     int       // current iterative deepening depth (main thread drives)
-	abortFlag     int32     // set to 1 atomically to stop all threads
-	numThreads    int   = 1 // number of search threads (1 = single-threaded)
+	softTimeLimit  int64     // allocated soft move time in ms; stop between iterations
+	hardTimeLimit  int64     // allocated hard move time in ms (-1 = unlimited); drop-dead limit
+	timeLimitStart int64     // Unix ms at the start of the active time budget
+	pondering      int32     // 1 while in ponder mode (ignore clock)
+	abortFlag      int32     // set to 1 atomically to stop all threads
+	numThreads     int   = 1 // number of search threads (1 = single-threaded)
 )
 
 // lmr[depth][moveIndex] holds the ply reduction for a quiet move tried
@@ -198,6 +198,7 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 			defer wg.Done()
 			var dummyPV [maxPly]int
 			for d := 1; atomic.LoadInt32(&abortFlag) == 0; d++ {
+				hs.rootDepth = d
 				hs.search(&pos, 0, -inf, inf, d, false, dummyPV[:], false)
 			}
 		}(h, pCopy)
@@ -226,10 +227,10 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 	var lastBestMove int
 	var bestMoveStability int
 
-	for rootDepth = 1; rootDepth <= maxDepth; rootDepth++ {
+	for ss.rootDepth = 1; ss.rootDepth <= maxDepth; ss.rootDepth++ {
 		// Before starting a new depth, check elapsed time against dynamic soft time limit.
-		if rootDepth > 1 && !pondering && hardTimeLimit >= 0 {
-			elapsed := time.Now().UnixMilli() - ss.searchStart
+		if ss.rootDepth > 1 && atomic.LoadInt32(&pondering) == 0 && hardTimeLimit >= 0 {
+			elapsed := time.Now().UnixMilli() - atomic.LoadInt64(&timeLimitStart)
 			adjustedSoft := softTimeLimit
 			if bestMoveStability >= 4 {
 				// Stable best move over 4+ consecutive iterations -> reduce soft budget by 25%
@@ -252,11 +253,11 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 			ss.multiPVIdx = pvIdx + 1
 			var iterScore int
 
-			//printMemory(rootDepth)
+			//printMemory(ss.rootDepth)
 
-			if rootDepth < 5 {
+			if ss.rootDepth < 5 {
 				// Aspiration windows are unreliable at shallow depths.
-				iterScore = ss.search(p, 0, -inf, inf, rootDepth, false, pvs[pvIdx][:], false)
+				iterScore = ss.search(p, 0, -inf, inf, ss.rootDepth, false, pvs[pvIdx][:], false)
 			} else {
 				score := scores[pvIdx]
 				// Score-adaptive initial delta: balanced positions get a tight
@@ -266,7 +267,7 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 				beta := min(inf, score+delta)
 
 				for {
-					iterScore = ss.search(p, 0, alpha, beta, rootDepth, false, pvs[pvIdx][:], false)
+					iterScore = ss.search(p, 0, alpha, beta, ss.rootDepth, false, pvs[pvIdx][:], false)
 					if ss.isAbortingSearch() {
 						break
 					}
@@ -548,11 +549,11 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// Skip if: depth <= 1 (too shallow to be reliable), the position
 		// is already beyond beta, we are in check, or only pawns remain.
 		// Reduction = base + depth/depthDiv + min((eval-beta)/evalDiv, maxEvalBonus).
-		if useNULL && depth >= nmpMinDepth && p.canNullMove() && staticEval >= beta + 30 {
+		if useNULL && depth >= nmpMinDepth && p.canNullMove() && staticEval >= beta+30 {
 
 			ss.contValid[ply] = false
 
-			reduction := nmpBaseReduction + depth/nmpDepthReduction + min((staticEval - beta) / nmpEvalDiv, nmpEvalMax)
+			reduction := nmpBaseReduction + depth/nmpDepthReduction + min((staticEval-beta)/nmpEvalDiv, nmpEvalMax)
 
 			// We need to prepare child accumulator, but we don't need a pointer,
 			// because null move does not change accumulator state.
@@ -795,8 +796,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			continue
 		}
 
-		// We are about to move. Prepare NNUE accumulator 
-		// for the next ply and update it now that we know 
+		// We are about to move. Prepare NNUE accumulator
+		// for the next ply and update it now that we know
 		// that move is legal and hasn't been pruned.
 
 		if ss.isUsingNNUE {
@@ -817,7 +818,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		if useLMR && depth >= minLmrDepth && (quietStage || badCapStage) &&
 			!nodeInCheck && movesTried >= minLmrMove &&
 			singleOptionValue[NodesLimit] == 0 {
-			
+
 			reduction := 1 // Base reduction for bad captures
 			if quietStage {
 				// Read base reduction value for quiet moves.
@@ -1137,7 +1138,7 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		// 	break
 		// }
 
-		// We are about to recurse. Prepare NNUE accumulator 
+		// We are about to recurse. Prepare NNUE accumulator
 		// for the next ply and update it since we know move is legal
 		if ss.isUsingNNUE {
 			childAcc := ss.prepareChildAccumulator(ply)
@@ -1250,7 +1251,7 @@ func (ss *SearchState) reportInfo(score int, pv []int) {
 		buf := uciBufPool.Get().(*bytes.Buffer)
 		buf.Reset()
 		fmt.Fprintf(buf, "info depth %d seldepth %d multipv %d time %d nodes %d nps %d hashfull %d score %s %d pv ",
-			rootDepth, ss.selDepth, ss.multiPVIdx, elapsed, ss.nodes, nps, hashfull, scoreType, score)
+			ss.rootDepth, ss.selDepth, ss.multiPVIdx, elapsed, ss.nodes, nps, hashfull, scoreType, score)
 		writePV(buf, pv)
 		buf.WriteByte('\n')
 		os.Stdout.Write(buf.Bytes())
@@ -1268,7 +1269,7 @@ func (ss *SearchState) checkTime() {
 		return
 	}
 
-	if ss.nodes&timeoutTestPeriod != 0 || rootDepth == 1 {
+	if ss.nodes&timeoutTestPeriod != 0 || ss.rootDepth == 1 {
 		return
 	}
 
@@ -1278,8 +1279,8 @@ func (ss *SearchState) checkTime() {
 	}
 
 	// Timeout
-	if !pondering && hardTimeLimit >= 0 {
-		if time.Now().UnixMilli()-ss.searchStart >= hardTimeLimit {
+	if atomic.LoadInt32(&pondering) == 0 && hardTimeLimit >= 0 {
+		if time.Now().UnixMilli()-atomic.LoadInt64(&timeLimitStart) >= hardTimeLimit {
 			atomic.StoreInt32(&abortFlag, 1)
 		}
 	}

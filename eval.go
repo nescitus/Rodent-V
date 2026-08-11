@@ -445,19 +445,14 @@ func evaluatePawnStructure(p *Pos, e *EvalData) {
 
 	var key = getPawnKey(p)
 
-	if wscoreMG, bscoreMG, wscoreEG, bscoreEG, wCenter, bCenter, ok := probePawnHash(key); ok {
-		add(e, White, EvalPawns, wscoreMG, wscoreEG)
-		add(e, Black, EvalPawns, bscoreMG, bscoreEG)
-		e.center[White] = CenterType(wCenter)
-		e.center[Black] = CenterType(bCenter)
-	} else {
-
-		initCenterType(p, e)
-		evaluatePawns(p, e, White)
-		evaluatePawns(p, e, Black)
-		storePawnHash(key, e.mgScore[White][EvalPawns], e.mgScore[Black][EvalPawns],
-			e.egScore[White][EvalPawns], e.egScore[Black][EvalPawns], int(e.center[White]), int(e.center[Black]))
+	if probePawnHash(key, e) {
+		return
 	}
+
+	initCenterType(p, e)
+	evaluatePawns(p, e, White)
+	evaluatePawns(p, e, Black)
+	storePawnHash(key, e)
 }
 
 func initCenterType(p *Pos, e *EvalData) {

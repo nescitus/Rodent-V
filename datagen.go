@@ -276,6 +276,7 @@ func runDatagenSearch(p *Pos, ss *SearchState, softNodesLimit int) (int, int) {
 	bestMove := 0
 
 	for d := 1; d < 100; d++ {
+		ss.rootDepth = d
 		iterScore := ss.search(p, 0, -inf, inf, d, false, pv[:], false)
 
 		// If we hit the 8M hard limit mid-search, we discard this depth's result

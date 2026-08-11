@@ -44,7 +44,7 @@ func flairClosed(p *Pos) int {
 	}
 
 	// Return score from the perspective of the side to move.
-	return scoreFromPerspective(score[White] - score[Black], p.side)
+	return scoreFromPerspective(score[White]-score[Black], p.side)
 }
 
 // flairTropism encourages moving pieces towards enemy king.
