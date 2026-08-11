@@ -26,13 +26,13 @@ on illegal or pruned moves.
 
 import (
 	_ "embed"
+	"math/bits"
 	"os"
-	"unsafe"
 
 	"golang.org/x/sys/cpu"
 )
 
-//go:embed nets/rodent_hm_512hl_4.bin
+//go:embed nets/rodent_ck_v3_8ob_512hl.bin
 var embeddedNet []byte
 
 // NNUE size and scale. AVX2 code supports following net sizes:
@@ -40,8 +40,13 @@ var embeddedNet []byte
 const (
 	NNUEInputSize  = 768
 	NNUEHiddenSize = 512
+	OutputBuckets  = 8
 	NNUEL0Scale    = 255
 	NNUEL1Scale    = 64
+
+	// Minimum parameter byte sizes for 1-bucket and 8-bucket network blobs (2 bytes per int16)
+	SingleBucketNetSize = (NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + 2*NNUEHiddenSize + 1) * 2
+	OutputBucketNetSize = (NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + OutputBuckets*2*NNUEHiddenSize + OutputBuckets) * 2
 )
 
 // Types of NNUE updates
@@ -61,8 +66,8 @@ const (
 type NNUEParameters struct {
 	InputWeights  [NNUEInputSize][NNUEHiddenSize]int16
 	InputBiases   [NNUEHiddenSize]int16
-	OutputWeights [2][NNUEHiddenSize]int16
-	OutputBias    int16
+	OutputWeights [OutputBuckets][2][NNUEHiddenSize]int16
+	OutputBiases  [OutputBuckets]int16
 }
 
 var nnueParams = &NNUEParameters{}
@@ -536,49 +541,44 @@ func screluWeighted(x, w int16) int32 {
 	return v * v * int32(w)
 }
 
-func (acc *Accumulator) getEval(stm int) int {
+func outputBucket(p *Pos) int {
+	occupied := p.colorBB[White] | p.colorBB[Black]
+	pieceCount := bits.OnesCount64(occupied)
+	bucket := (pieceCount - 2) / 4
+	if bucket < 0 {
+		return 0
+	}
+	if bucket >= OutputBuckets {
+		return OutputBuckets - 1
+	}
+	return bucket
+}
+
+func (acc *Accumulator) getEval(p *Pos, stm int) int {
+	bucket := outputBucket(p)
 	var sum int32
 
 	evalFunction(
 		&acc.values[stm][0],
 		&acc.values[stm^1][0],
-		&nnueParams.OutputWeights[0][0],
-		&nnueParams.OutputWeights[1][0],
+		&nnueParams.OutputWeights[bucket][0][0],
+		&nnueParams.OutputWeights[bucket][1][0],
 		&sum,
 	)
 
-	sum = sum/NNUEL0Scale + int32(nnueParams.OutputBias)
+	sum = sum/NNUEL0Scale + int32(nnueParams.OutputBiases[bucket])
 
 	return int(sum * int32(singleOptionValue[NnueScale]) /
 		(NNUEL0Scale * NNUEL1Scale))
 }
 
-func nnueInitEmbedded() bool {
-	need := int(unsafe.Sizeof(NNUEParameters{}))
-	if len(embeddedNet) < need {
-		return false
-	}
-
-	base := unsafe.Pointer(&embeddedNet[0])
-	if uintptr(base)%unsafe.Alignof(NNUEParameters{}) != 0 {
-		panic("embedded net is misaligned")
-	}
-
-	nnueParams = (*NNUEParameters)(base)
-	nnue.Loaded = true
-	return true
-}
-
-// Load a raw Bullet-compatible parameter blob.
-func nnueLoad(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil {
+func nnueLoadFromBytes(data []byte) bool {
+	if len(data) < SingleBucketNetSize {
 		nnue.Loaded = false
 		return false
 	}
 
 	offset := 0
-
 	nnueParams = new(NNUEParameters)
 
 	readI16 := func() int16 {
@@ -586,7 +586,6 @@ func nnueLoad(path string) bool {
 			uint16(data[offset]) |
 				uint16(data[offset+1])<<8,
 		)
-
 		offset += 2
 		return value
 	}
@@ -601,16 +600,54 @@ func nnueLoad(path string) bool {
 		nnueParams.InputBiases[neuron] = readI16()
 	}
 
-	for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
-		nnueParams.OutputWeights[0][neuron] = readI16()
+	// 8 Output Buckets vs Single Output Bucket
+	if len(data) >= OutputBucketNetSize {
+		for b := 0; b < OutputBuckets; b++ {
+			for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
+				nnueParams.OutputWeights[b][0][neuron] = readI16()
+			}
+			for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
+				nnueParams.OutputWeights[b][1][neuron] = readI16()
+			}
+		}
+
+		for b := 0; b < OutputBuckets; b++ {
+			nnueParams.OutputBiases[b] = readI16()
+		}
+	} else {
+		// Single Output Bucket fallback - broadcast weights to all 8 buckets
+		var stmWeights [NNUEHiddenSize]int16
+		var ntmWeights [NNUEHiddenSize]int16
+
+		for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
+			stmWeights[neuron] = readI16()
+		}
+		for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
+			ntmWeights[neuron] = readI16()
+		}
+		bias := readI16()
+
+		for b := 0; b < OutputBuckets; b++ {
+			nnueParams.OutputWeights[b][0] = stmWeights
+			nnueParams.OutputWeights[b][1] = ntmWeights
+			nnueParams.OutputBiases[b] = bias
+		}
 	}
 
-	for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
-		nnueParams.OutputWeights[1][neuron] = readI16()
-	}
-
-	nnueParams.OutputBias = readI16()
 	nnue.Loaded = true
-
 	return true
+}
+
+func nnueInitEmbedded() bool {
+	return nnueLoadFromBytes(embeddedNet)
+}
+
+// Load a raw Bullet-compatible parameter blob.
+func nnueLoad(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		nnue.Loaded = false
+		return false
+	}
+	return nnueLoadFromBytes(data)
 }

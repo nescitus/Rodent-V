@@ -103,20 +103,20 @@ func uciLoop() {
 			}
 			fmt.Printf("id name Rodent V %s %s\n", versionString, arch)
 			fmt.Println("id author Naman Thanki, Pawel Koziol, based on Sungorus by Pablo Vazquez")
-			
+
 			// these options should be always exposed
 			fmt.Println("option name Hash type spin default 16 min 1 max 4096")
 			fmt.Println("option name Clear Hash type button")
 			fmt.Println("option name UCI_LimitStrength type check default false")
 			fmt.Printf("option name UCI_Elo type spin default %d min 800 max 3000\n", engineElo)
 
-            if (!noOptions) {
+			if !noOptions {
 				fmt.Println("option name OwnBook type check default false")
 				fmt.Println("option name Threads type spin default 1 min 1 max 256")
 				fmt.Println("option name MultiPV type spin default 1 min 1 max 500")
 				printSingleOption(HcePerc)
 				printSingleOption(NnuePerc)
-				if (readPersonalityFiles) {
+				if readPersonalityFiles {
 					fmt.Println("option name PersonalityFile type string default", personalityFile)
 				} else {
 					fmt.Println("option name Save Personality type button")
@@ -267,7 +267,7 @@ func uciLoop() {
 			{
 				var acc Accumulator
 				refresh(&p, &acc)
-				fmt.Print(acc.getEval(p.side))
+				fmt.Print(acc.getEval(&p, p.side))
 			}
 
 		case "measure_scale":
@@ -432,7 +432,7 @@ func parseSetOption(tokens []string) {
 		}
 
 		return
-		
+
 	case strings.EqualFold(name, "OwnBook"):
 		if noOptions {
 			return
