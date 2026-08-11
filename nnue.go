@@ -32,7 +32,7 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-//go:embed nets/rodent_ck_v3_8ob_512hl.bin
+//go:embed nets/rodent_hm_512hl_8ob.bin
 var embeddedNet []byte
 
 // NNUE size and scale. AVX2 code supports following net sizes:
