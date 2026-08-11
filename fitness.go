@@ -108,7 +108,7 @@ func measureScale(path string) {
 		parseFEN(&p, line)
 
 		refresh(&p, &acc)
-		eval := acc.getEval(p.side)
+		eval := acc.getEval(&p, p.side)
 
 		absEval := eval
 		if absEval < 0 {

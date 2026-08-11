@@ -193,7 +193,7 @@ func evaluateScaledNNUE(p *Pos, acc *Accumulator)int {
 				900 * p.count[White][Q] + 900 * p.count[Black][Q]
 
 	// percentage scaling
-	score := acc.getEval(p.side) * singleOptionValue[NnuePerc] / 100
+	score := acc.getEval(p, p.side) * singleOptionValue[NnuePerc] / 100
 
 	// decrease score as material disappears
 	return score * (25000 + material) / 32768;
