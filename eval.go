@@ -188,7 +188,7 @@ func evaluateScaledNNUE(p *Pos, acc *Accumulator)int {
 	// sum of material for both sides
 	material := 100 * p.count[White][P] + 100 * p.count[Black][P] + 
 				300 * p.count[White][N] + 300 * p.count[Black][N] + 
-				300 * p.count[White][B] + 300 * p.count[White][R] + 
+				300 * p.count[White][B] + 300 * p.count[Black][B] + 
 				500 * p.count[White][R] + 500 * p.count[Black][R] + 
 				900 * p.count[White][Q] + 900 * p.count[Black][Q]
 
