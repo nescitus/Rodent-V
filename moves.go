@@ -47,6 +47,7 @@ package main
 
 func makeMove(p *Pos, u *Update, r *Revert, move int) {
 	side := p.side
+	enemy := opp(side)
 
 	r.oldKey = p.key
 	r.oldPawnKey = p.pawnKey
@@ -121,12 +122,12 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 	// --- Handle a normal capture at "to" ---
 	if u.captType != NO_TP {
 		u.capSq = u.to
-		hashDelta = zobPiece[makePiece(opp(side), u.captType)][u.to]
+		hashDelta = zobPiece[makePiece(enemy, u.captType)][u.to]
 		p.key ^= hashDelta
 		if u.captType == P {
-			p.pawnKey[opp(side)] ^= hashDelta
+			p.pawnKey[enemy] ^= hashDelta
 		} else if u.captType != K {
-			p.nonPawnKey[opp(side)] ^= hashDelta
+			p.nonPawnKey[enemy] ^= hashDelta
 		}
 		if u.captType == N || u.movingType == B {
 			p.minorKey[side] ^= hashDelta
@@ -134,9 +135,9 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 		if u.captType == R || u.movingType == Q {
 			p.majorKey[side] ^= hashDelta
 		}
-		p.colorBB[opp(side)] ^= squareBit(u.to)
+		p.colorBB[enemy] ^= squareBit(u.to)
 		p.typeBB[u.captType] ^= squareBit(u.to)
-		p.count[opp(side)][u.captType]--
+		p.count[enemy][u.captType]--
 		if isProm(move) {
 			u.flag = uPROMCAPT
 		} else {
@@ -178,17 +179,17 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 		capSq := u.to ^ 8
 		u.capSq = capSq
 		p.board[capSq] = NO_PC
-		p.key ^= zobPiece[makePiece(opp(side), P)][capSq]
-		p.pawnKey[opp(side)] = p.pawnKey[opp(side)] ^ zobPiece[makePiece(opp(side), P)][capSq]
-		p.colorBB[opp(side)] ^= squareBit(capSq)
+		p.key ^= zobPiece[makePiece(enemy, P)][capSq]
+		p.pawnKey[enemy] = p.pawnKey[enemy] ^ zobPiece[makePiece(enemy, P)][capSq]
+		p.colorBB[enemy] ^= squareBit(capSq)
 		p.typeBB[P] ^= squareBit(capSq)
-		p.count[opp(side)][P]--
+		p.count[enemy][P]--
 
 	case EP_SET:
 		// Double pawn push: record the en-passant square if an enemy
 		// pawn can actually capture there next move.
 		epSq := u.to ^ 8
-		if pawnAtk[side][epSq]&p.pieceBB(opp(side), P) != 0 {
+		if pawnAtk[side][epSq]&p.pieceBB(enemy, P) != 0 {
 			p.epSquare = epSq
 			p.key ^= zobEP[fileOf(epSq)]
 		}
