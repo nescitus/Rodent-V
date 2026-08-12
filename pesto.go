@@ -17,7 +17,7 @@ package main
 var mgMat = [6]int{P: 82, N: 337, B: 365, R: 477, Q: 1025, K: 0}
 var egMat = [6]int{P: 94, N: 281, B: 297, R: 512, Q: 936, K: 0}
 
-// Game phase is calculated as a sum of contributions of 
+// Game phase is calculated as a sum of contributions of
 // non-pawn pieces for both sides; opening position is 24,
 // pawn endgame is 0.
 var gamePhase = [6]int{P: 0, N: 1, B: 1, R: 2, Q: 4, K: 0}
@@ -178,7 +178,7 @@ func init() {
 	}
 }
 
-// evaluatePesto returns a PeSTO score from the perspective 
+// evaluatePesto returns a PeSTO score from the perspective
 // of the side to move.
 func evaluatePesto(p *Pos) int {
 	var mg [2]int
