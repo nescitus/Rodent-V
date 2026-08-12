@@ -220,6 +220,9 @@ var (
 	zobPiece  [12][64]uint64
 	zobCastle [16]uint64
 	zobEP     [8]uint64
+	// For pin detection and SEE:
+	BetweenBB  [64][64]uint64
+	LineBB     [64][64]uint64
 )
 
 // pieceValue[type]: centipawn material value of each piece type.
@@ -452,5 +455,38 @@ func initTables() {
 	}
 	for i := 0; i < 8; i++ {
 		zobEP[i] = nextRand()
+	}
+
+	// 5) Initialize BetweenBB and LineBB
+	for sq1 := 0; sq1 < 64; sq1++ {
+		for sq2 := 0; sq2 < 64; sq2++ {
+			// Find if they are on the same line
+			var lineMask uint64
+			sq1Bit := squareBit(sq1)
+			sq2Bit := squareBit(sq2)
+			
+			for dir := 0; dir < 4; dir++ {
+				if lineMasks[dir][sq1] & sq2Bit != 0 {
+					lineMask = lineMasks[dir][sq1]
+					break
+				}
+			}
+
+			if lineMask != 0 {
+				LineBB[sq1][sq2] = lineMask
+				
+				// BetweenBB is the intersection of attacks from sq1 (with sq2 as blocker) 
+				// and attacks from sq2 (with sq1 as blocker)
+				var atk1, atk2 uint64
+				if lineMask == lineMasks[0][sq1] || lineMask == lineMasks[1][sq1] {
+					atk1 = rookAttacks(sq2Bit, sq1)
+					atk2 = rookAttacks(sq1Bit, sq2)
+				} else {
+					atk1 = bishopAttacks(sq2Bit, sq1)
+					atk2 = bishopAttacks(sq1Bit, sq2)
+				}
+				BetweenBB[sq1][sq2] = atk1 & atk2
+			}
+		}
 	}
 }

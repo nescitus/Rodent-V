@@ -235,6 +235,12 @@ func scoreQuiet(m *MovePicker) {
 		if ply >= 2 && ss.contValid[ply-2] {
 			score += int(ss.contHistMain[ss.contSide[ply-2]][ss.contPiece[ply-2]][ss.contTo[ply-2]][side][pt][to])
 		}
+
+		// quiet check bonus (doesn't gain anything)
+		// if moveGivesCheck(m.p, mv) && see(m.p, mv, -seeQuietCheckMargin) {
+		// 	score += maxHist
+		// }
+
 		m.value[i] = score
 	}
 }
@@ -270,7 +276,7 @@ func isBadCapture(p *Pos, move int) bool {
 	if moveType(move) == EP_CAP {
 		return false // pawn x pawn is always fair
 	}
-	return swap(p, from, to) < 0
+	return !see(p, move, 0)
 }
 
 // mvvLva scores a capture move for ordering:
@@ -310,7 +316,7 @@ func histUpdate(entry *int, bonus int) {
 	}
 	gravityDiv := 512 + (absBonus >> 4)
 	s := *entry
-	s += (32 * bonus) - (s * absBonus) / gravityDiv
+	s += (32 * bonus) - (s*absBonus)/gravityDiv
 	*entry = min(max(s, -maxHist), maxHist)
 }
 
@@ -321,7 +327,7 @@ func histUpdateInt16(entry *int16, bonus int) {
 	}
 	gravityDiv := 512 + (absBonus >> 4)
 	s := int(*entry)
-	s += (32 * bonus) - (s * absBonus) / gravityDiv
+	s += (32 * bonus) - (s*absBonus)/gravityDiv
 	*entry = int16(min(max(s, -maxHist), maxHist))
 }
 

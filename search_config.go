@@ -57,6 +57,25 @@ const (
 	minLmrMove      = 4
 	cutNodeLmr      = 1
 
+	// Quiet SEE Pruning
+	useQuietSEEPruning  = false
+	seeQuietMargin      = 25
+	seeQuietCheckMargin = 75 // Max material loss for a quiet check to receive a move ordering bonus
+
+	// Main Search Capture Pruning
+	useMainCaptureSEEPruning = false
+	seeMainMargin            = 175 // Scaled linearly by depth
+
+	// Quiescence Sacrifice Pruning
+	useQsSacrificeSEEPruning = false
+	seeQSSacMargin           = 75 // margin for skipping massive sacrifices in QS
+
+	// Quiescence SEE Pruning
+	useQsSEEPruning = true
+	seeQSMargin     = 128
+
+	useQSFutility = true // static QS futility pruning
+
 	qsFpPawnMargin  = 300 // qs futility margin when capturing a pawn (passers warrant extra slack)
 	qsFpPieceMargin = 200 // qs futility margin when capturing a piece
 	qsLmpLimit      = 2   // max captures tried per qs node (outside check) to cap explosion

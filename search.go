@@ -548,11 +548,11 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// Skip if: depth <= 1 (too shallow to be reliable), the position
 		// is already beyond beta, we are in check, or only pawns remain.
 		// Reduction = base + depth/depthDiv + min((eval-beta)/evalDiv, maxEvalBonus).
-		if useNULL && depth >= nmpMinDepth && p.canNullMove() && staticEval >= beta + 30 {
+		if useNULL && depth >= nmpMinDepth && p.canNullMove() && staticEval >= beta+30 {
 
 			ss.contValid[ply] = false
 
-			reduction := nmpBaseReduction + depth/nmpDepthReduction + min((staticEval - beta) / nmpEvalDiv, nmpEvalMax)
+			reduction := nmpBaseReduction + depth/nmpDepthReduction + min((staticEval-beta)/nmpEvalDiv, nmpEvalMax)
 
 			// We need to prepare child accumulator, but we don't need a pointer,
 			// because null move does not change accumulator state.
@@ -735,6 +735,38 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// the square may hold a promoted piece rather than the original pawn.
 		movedPiece := p.typeAt(moveFrom(move))
 
+		// --- Quiet SEE Pruning ---
+		// Prune quiet moves that hang material beyond a quadratically scaled margin based on expected LMR depth.
+		if useQuietSEEPruning && stage == StageQuiet && !isPv {
+			expectedReduction := 0
+			if depth >= minLmrDepth && movesTried >= minLmrMove {
+				expectedReduction = lmr[min(depth, 63)][min(movesTried, 63)]
+			}
+			lmrDepth := depth - 1 - expectedReduction
+
+			// Inflate LMR depth based on history to save high-history quiets from pruning
+			historyScore := ss.histTable[p.side][moveFrom(move)][moveTo(move)]
+			lmrDepth += historyScore / 1024
+
+			if lmrDepth < 0 {
+				lmrDepth = 0
+			}
+
+			threshold := -(seeQuietMargin * lmrDepth * lmrDepth)
+			if !see(p, move, threshold) {
+				continue
+			}
+		}
+
+		// --- Main Search Capture Pruning ---
+		// Prune captures and checks in the main search that lose excessive material based on depth.
+		if useMainCaptureSEEPruning && stage != StageQuiet {
+			threshold := -(seeMainMargin * depth)
+			if !see(p, move, threshold) {
+				continue
+			}
+		}
+
 		// doMove() executes a move and creates pointer
 		// to data required by NNUE accumulator
 		u := ss.doMove(p, ply, move)
@@ -795,8 +827,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			continue
 		}
 
-		// We are about to move. Prepare NNUE accumulator 
-		// for the next ply and update it now that we know 
+		// We are about to move. Prepare NNUE accumulator
+		// for the next ply and update it now that we know
 		// that move is legal and hasn't been pruned.
 
 		if ss.isUsingNNUE {
@@ -817,7 +849,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		if useLMR && depth >= minLmrDepth && (quietStage || badCapStage) &&
 			!nodeInCheck && movesTried >= minLmrMove &&
 			singleOptionValue[NodesLimit] == 0 {
-			
+
 			reduction := 1 // Base reduction for bad captures
 			if quietStage {
 				// Read base reduction value for quiet moves.
@@ -1090,32 +1122,50 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 				continue
 			}
 
+			// NOTE: isBadCapture is better and cheaper than this
+			// but included for funsies
+			if useQsSacrificeSEEPruning {
+				// Hard filter: skip captures that are massive outright blunders
+				if !see(p, move, -seeQSSacMargin) {
+					continue
+				}
+			}
+
 			// Use a higher margin for pawn captures: passers can have
 			// wildly different values so we give them extra slack.
 			var margin int
 			if moveType(move) == EP_CAP || p.typeAt(moveTo(move)) == P {
-
 				margin = qsFpPawnMargin
 			} else {
 				margin = qsFpPieceMargin
 			}
 
-			futility := best + margin
+			if useQSFutility {
+				futility := best + margin
 
-			if moveType(move) == EP_CAP {
-				futility += pieceValue[P]
-			} else if p.board[moveTo(move)] != NO_PC {
-				futility += pieceValue[p.typeAt(moveTo(move))]
+				if moveType(move) == EP_CAP {
+					futility += pieceValue[P]
+				} else if p.board[moveTo(move)] != NO_PC {
+					futility += pieceValue[p.typeAt(moveTo(move))]
+				}
+
+				if isProm(move) {
+					futility += pieceValue[promType(move)] - pieceValue[P]
+				}
+
+				if futility <= alpha {
+					best = max(best, futility)
+					continue
+				}
 			}
 
-			if isProm(move) {
-				futility += pieceValue[promType(move)] -
-					pieceValue[P]
-			}
-
-			if futility <= alpha {
-				best = max(best, futility)
-				continue
+			if useQsSEEPruning {
+				// Quiescence SEE Pruning
+				threshold := alpha - best - seeQSMargin + 1
+				if threshold > 0 && !see(p, move, threshold) {
+					best = max(best, alpha-seeQSMargin)
+					continue
+				}
 			}
 		}
 
@@ -1137,7 +1187,7 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		// 	break
 		// }
 
-		// We are about to recurse. Prepare NNUE accumulator 
+		// We are about to recurse. Prepare NNUE accumulator
 		// for the next ply and update it since we know move is legal
 		if ss.isUsingNNUE {
 			childAcc := ss.prepareChildAccumulator(ply)
