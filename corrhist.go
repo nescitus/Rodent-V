@@ -44,15 +44,15 @@ func (ss *SearchState) getCorrection(p *Pos) int {
 	// non pawn corrhist
 	corr += int(ss.nonPawnCorrHist[White][side][int(p.nonPawnKey[White]%corrHistSize)]) / corrHistGrain
 	corr += int(ss.nonPawnCorrHist[Black][side][int(p.nonPawnKey[Black]%corrHistSize)]) / corrHistGrain
-	
+
 	// minor corrhist (halved)
 	corr += (int(ss.minorCorrHist[White][side][int(p.minorKey[White]%corrHistSize)]) / corrHistGrain) / 2
 	corr += (int(ss.minorCorrHist[Black][side][int(p.minorKey[Black]%corrHistSize)]) / corrHistGrain) / 2
-	
+
 	// major corrhist (halved)
 	corr += (int(ss.majorCorrHist[White][side][int(p.majorKey[White]%corrHistSize)]) / corrHistGrain) / 2
 	corr += (int(ss.majorCorrHist[Black][side][int(p.majorKey[Black]%corrHistSize)]) / corrHistGrain) / 2
-	
+
 	return corr
 }
 

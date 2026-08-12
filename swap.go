@@ -54,18 +54,18 @@ func swap(p *Pos, from, to int) int {
 	var score [32]int
 	score[0] = pieceValue[p.typeAt(to)]
 
-	attType  := p.typeAt(from)
-	occ      := p.occupied() ^ squareBit(from) // remove the initial attacker
+	attType := p.typeAt(from)
+	occ := p.occupied() ^ squareBit(from) // remove the initial attacker
 
 	// Gather all attackers to "to" (both sides), then exclude the
 	// capturing piece which is no longer on the board.
 	attackers := attacksTo(p, to)
 	attackers |= (bishopAttacks(occ, to) & (p.typeBB[B] | p.typeBB[Q])) |
-				 (rookAttacks(occ, to) & (p.typeBB[R] | p.typeBB[Q]))
+		(rookAttacks(occ, to) & (p.typeBB[R] | p.typeBB[Q]))
 	attackers &= occ
 
 	side := opp(p.side) // opponent moves first (they recapture)
-	ply  := 1
+	ply := 1
 
 	for attackers&p.colorBB[side] != 0 {
 		if attType == K {
