@@ -107,6 +107,7 @@ func uciLoop() {
 			// these options should be always exposed
 			fmt.Println("option name Hash type spin default 16 min 1 max 4096")
 			fmt.Println("option name Clear Hash type button")
+			fmt.Println("option name UCI_Chess960 type check default false")
 			fmt.Println("option name UCI_LimitStrength type check default false")
 			fmt.Printf("option name UCI_Elo type spin default %d min 800 max 3000\n", engineElo)
 
@@ -294,6 +295,8 @@ func uciLoop() {
 //
 //	Hash: resize the transposition table (in megabytes).
 //	Clear Hash: zero the transposition table.
+var useChess960 bool
+
 func parseSetOption(tokens []string) {
 	name := ""
 	value := ""
@@ -348,6 +351,12 @@ func parseSetOption(tokens []string) {
 		if b, err := strconv.ParseBool(value); err == nil {
 			limitStrength = b
 			configureEngineStrength()
+		}
+		return
+
+	case strings.EqualFold(name, "UCI_Chess960"):
+		if b, err := strconv.ParseBool(value); err == nil {
+			useChess960 = b
 		}
 		return
 
@@ -640,6 +649,15 @@ func moveToStr(move int) string {
 		byte('a' + fileOf(to)),
 		byte('1' + rankOf(to)),
 	}
+
+	if moveType(move) == CASTLE && !useChess960 {
+		if to > from {
+			s[2] = 'g' // kingside
+		} else {
+			s[2] = 'c' // queenside
+		}
+	}
+
 	if isProm(move) {
 		const promChars = "nbrq"
 		s = append(s, promChars[(move>>12)&3])
@@ -659,7 +677,14 @@ func parseMove(p *Pos, s string) int {
 	mt := NORMAL
 
 	switch {
-	case p.typeAt(from) == K && abs(to-from) == 2:
+	case p.typeAt(from) == K && abs(to-from) == 2 && !useChess960:
+		mt = CASTLE
+		if to > from { // kingside
+			to = p.castlingRookSq[p.side][0]
+		} else { // queenside
+			to = p.castlingRookSq[p.side][1]
+		}
+	case p.typeAt(from) == K && p.typeAt(to) == R && colorOf(p.board[to]) == p.side:
 		mt = CASTLE
 	case p.typeAt(from) == P && to == p.epSquare:
 		mt = EP_CAP
@@ -686,13 +711,25 @@ var uciBufPool = sync.Pool{
 	},
 }
 
-func writeMove(buf *bytes.Buffer, move int) {
+func writeMove(buf *bytes.Buffer, move int, useChess960 bool) {
 	from := moveFrom(move)
 	to := moveTo(move)
+
+	toFile := fileOf(to)
+	toRank := rankOf(to)
+
+	if moveType(move) == CASTLE && !useChess960 {
+		if to > from {
+			toFile = 6 // 'g'
+		} else {
+			toFile = 2 // 'c'
+		}
+	}
+
 	buf.WriteByte(byte('a' + fileOf(from)))
 	buf.WriteByte(byte('1' + rankOf(from)))
-	buf.WriteByte(byte('a' + fileOf(to)))
-	buf.WriteByte(byte('1' + rankOf(to)))
+	buf.WriteByte(byte('a' + toFile))
+	buf.WriteByte(byte('1' + toRank))
 	if isProm(move) {
 		const promChars = "nbrq"
 		buf.WriteByte(promChars[(move>>12)&3])
@@ -707,7 +744,7 @@ func writePV(buf *bytes.Buffer, pv []int) {
 		if i > 0 {
 			buf.WriteByte(' ')
 		}
-		writeMove(buf, move)
+		writeMove(buf, move, useChess960)
 	}
 }
 

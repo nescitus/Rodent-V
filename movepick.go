@@ -276,5 +276,5 @@ func mvvLva(p *Pos, move int) int {
 
 // isQuiet returns true if move is a quiet move (no capture, no promotion, no EP).
 func isQuiet(p *Pos, move int) bool {
-	return p.board[moveTo(move)] == NO_PC && !isProm(move) && moveType(move) != EP_CAP
+	return (p.board[moveTo(move)] == NO_PC || moveType(move) == CASTLE) && !isProm(move) && moveType(move) != EP_CAP
 }
