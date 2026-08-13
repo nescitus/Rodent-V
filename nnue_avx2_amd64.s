@@ -28,6 +28,25 @@ addsingle512_loop:
 	VZEROUPPER
 	RET
 
+// version for 768 neurons
+TEXT ·addSingleAVX2_768(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+
+	XORQ R8, R8
+
+addsingle768_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPADDW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+
+	ADDQ $32, R8
+	CMPQ R8, $1536
+	JB addsingle768_loop
+
+	VZEROUPPER
+	RET
+
 // Each array contains 64 int16 values = 128 bytes.
 // One YMM register holds 16 int16 values = 32 bytes.
 // Therefore the loop executes four times.
@@ -641,6 +660,125 @@ castle_512_loop:
 	VZEROUPPER
 	RET
 
+// functions for 768 hidden neurons
+
+TEXT ·captureAVX2_768(SB), NOSPLIT, $0-64
+	MOVQ a0+0(FP), AX
+	MOVQ a1+8(FP), BX
+
+	MOVQ wTo0+16(FP), CX
+	MOVQ wFrom0+24(FP), DX
+	MOVQ wCap0+32(FP), SI
+
+	MOVQ wTo1+40(FP), DI
+	MOVQ wFrom1+48(FP), R8
+	MOVQ wCap1+56(FP), R9
+
+	XORQ R10, R10
+
+capture_768_loop:
+	// Perspective 0:
+	// a0 += wTo0 - wFrom0 - wCap0
+	VMOVDQU (AX)(R10*1), Y0
+	VPADDW  (CX)(R10*1), Y0, Y0
+	VPSUBW  (DX)(R10*1), Y0, Y0
+	VPSUBW  (SI)(R10*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R10*1)
+
+	// Perspective 1:
+	// a1 += wTo1 - wFrom1 - wCap1
+	VMOVDQU (BX)(R10*1), Y1
+	VPADDW  (DI)(R10*1), Y1, Y1
+	VPSUBW  (R8)(R10*1), Y1, Y1
+	VPSUBW  (R9)(R10*1), Y1, Y1
+	VMOVDQU Y1, (BX)(R10*1)
+
+	// loop limit is 1536 = 2 * 768
+	ADDQ $32, R10
+	CMPQ R10, $1536
+	JB capture_768_loop
+
+	VZEROUPPER
+	RET
+
+TEXT ·moveAVX2_768(SB), NOSPLIT, $0-48
+	MOVQ a0+0(FP), AX
+	MOVQ a1+8(FP), BX
+
+	MOVQ wFrom0+16(FP), CX
+	MOVQ wTo0+24(FP), DX
+
+	MOVQ wFrom1+32(FP), SI
+	MOVQ wTo1+40(FP), DI
+
+	XORQ R8, R8
+
+move_loop_768:
+	// Perspective 0:
+	// a0 += wTo0 - wFrom0
+	VMOVDQU (AX)(R8*1), Y0
+	VPADDW  (DX)(R8*1), Y0, Y0
+	VPSUBW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+
+	// Perspective 1:
+	// a1 += wTo1 - wFrom1
+	VMOVDQU (BX)(R8*1), Y1
+	VPADDW  (DI)(R8*1), Y1, Y1
+	VPSUBW  (SI)(R8*1), Y1, Y1
+	VMOVDQU Y1, (BX)(R8*1)
+
+	ADDQ $32, R8
+	CMPQ R8, $1536
+	JB move_loop_768
+
+	VZEROUPPER
+	RET
+
+TEXT ·castleAVX2_768(SB), NOSPLIT, $0-80
+	MOVQ a0+0(FP), AX
+	MOVQ a1+8(FP), BX
+
+	MOVQ wKFrom0+16(FP), CX
+	MOVQ wKTo0+24(FP), DX
+	MOVQ wRFrom0+32(FP), SI
+	MOVQ wRTo0+40(FP), DI
+
+	MOVQ wKFrom1+48(FP), R8
+	MOVQ wKTo1+56(FP), R9
+	MOVQ wRFrom1+64(FP), R10
+	MOVQ wRTo1+72(FP), R11
+
+	XORQ R12, R12
+
+castle_768_loop:
+	// Perspective 0:
+	// a0 += kingTo - kingFrom + rookTo - rookFrom
+	VMOVDQU (AX)(R12*1), Y0
+	VPADDW  (DX)(R12*1), Y0, Y0
+	VPSUBW  (CX)(R12*1), Y0, Y0
+	VPADDW  (DI)(R12*1), Y0, Y0
+	VPSUBW  (SI)(R12*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R12*1)
+
+	// Perspective 1:
+	// a1 += kingTo - kingFrom + rookTo - rookFrom
+	VMOVDQU (BX)(R12*1), Y1
+	VPADDW  (R9)(R12*1), Y1, Y1
+	VPSUBW  (R8)(R12*1), Y1, Y1
+	VPADDW  (R11)(R12*1), Y1, Y1
+	VPSUBW  (R10)(R12*1), Y1, Y1
+	VMOVDQU Y1, (BX)(R12*1)
+
+	ADDQ $32, R12
+
+	// 768 int16 neurons = 1536 bytes
+	CMPQ R12, $1536
+	JB castle_768_loop
+
+	VZEROUPPER
+	RET
+
 // EVAL
 
 // func getEvalAVX2_64(
@@ -1185,3 +1323,131 @@ eval512_loop:
 
 	VZEROUPPER
 	RET
+
+// func getEvalAVX2_768(
+//     a0, a1 *int16,
+//     w0, w1 *int16,
+//     sum *int32,
+// )
+//
+// For every neuron:
+//
+//     v = clamp(acc, 0, 255)
+//     sum += v * v * weight
+//
+// Lizard-style exact split:
+//
+//     v² = v * floor(v/2) + v * ceil(v/2)
+//
+// 768 int16 neurons = 1536 bytes.
+// Each loop iteration processes 16 neurons per perspective.
+TEXT ·getEvalAVX2_768(SB), NOSPLIT, $0-40
+	MOVQ a0+0(FP), AX
+	MOVQ a1+8(FP), BX
+	MOVQ w0+16(FP), CX
+	MOVQ w1+24(FP), DX
+	MOVQ sum+32(FP), SI
+
+	// Y14 = sixteen int16 zeros.
+	VPXOR Y14, Y14, Y14
+
+	// Y15 = sixteen int16 values equal to 255.
+	MOVL $255, R8
+	VMOVD R8, X15
+	VPBROADCASTW X15, Y15
+
+	// Y13 = sixteen int16 values equal to 1 for ceil calculation.
+	MOVL $1, R8
+	VMOVD R8, X13
+	VPBROADCASTW X13, Y13
+
+	// Y8 accumulates eight int32 partial sums.
+	VPXOR Y8, Y8, Y8
+
+	XORQ R9, R9
+
+eval768_loop:
+	// ------------------------------------------------------------
+	// Perspective 0
+	// ------------------------------------------------------------
+
+	// Load 16 accumulator values and 16 signed weights.
+	VMOVDQU (AX)(R9*1), Y0
+	VMOVDQU (CX)(R9*1), Y1
+
+	// SCReLU clipping: v = clamp(acc, 0, 255).
+	VPMAXSW Y14, Y0, Y0
+	VPMINSW Y15, Y0, Y0
+
+	// Y2 = floor(v / 2)
+	// Y3 = ceil(v / 2) = (v + 1) / 2
+	VPSRLW $1, Y0, Y2
+	VPADDW Y13, Y0, Y3
+	VPSRLW $1, Y3, Y3
+
+	// Y2 = v * floor(v / 2)
+	// Y3 = v * ceil(v / 2)
+	VPMULLW Y0, Y2, Y2
+	VPMULLW Y0, Y3, Y3
+
+	// Multiply partial products by output weights and horizontally add pairs.
+	VPMADDWD Y1, Y2, Y2
+	VPMADDWD Y1, Y3, Y3
+
+	// Accumulate into Y8.
+	VPADDD Y2, Y8, Y8
+	VPADDD Y3, Y8, Y8
+
+	// ------------------------------------------------------------
+	// Perspective 1
+	// ------------------------------------------------------------
+
+	VMOVDQU (BX)(R9*1), Y0
+	VMOVDQU (DX)(R9*1), Y1
+
+	// SCReLU clipping: v = clamp(acc, 0, 255).
+	VPMAXSW Y14, Y0, Y0
+	VPMINSW Y15, Y0, Y0
+
+	// Y2 = floor(v / 2)
+	// Y3 = ceil(v / 2) = (v + 1) / 2
+	VPSRLW $1, Y0, Y2
+	VPADDW Y13, Y0, Y3
+	VPSRLW $1, Y3, Y3
+
+	// Y2 = v * floor(v / 2)
+	// Y3 = v * ceil(v / 2)
+	VPMULLW Y0, Y2, Y2
+	VPMULLW Y0, Y3, Y3
+
+	// Multiply partial products by output weights and horizontally add pairs.
+	VPMADDWD Y1, Y2, Y2
+	VPMADDWD Y1, Y3, Y3
+
+	// Accumulate into Y8.
+	VPADDD Y2, Y8, Y8
+	VPADDD Y3, Y8, Y8
+
+	// 16 int16 neurons = 32 bytes.
+	ADDQ $32, R9
+
+	// 768 int16 neurons = 1536 bytes.
+	CMPQ R9, $1536
+	JL eval768_loop
+
+	// Horizontal sum of eight int32 lanes in Y8.
+	VEXTRACTI128 $1, Y8, X1
+	VPADDD X1, X8, X8
+
+	VPSHUFD $0x4E, X8, X1
+	VPADDD X1, X8, X8
+
+	VPSHUFD $0xB1, X8, X1
+	VPADDD X1, X8, X8
+
+	VMOVD X8, R8
+	MOVL R8, (SI)
+
+	VZEROUPPER
+	RET
+	
