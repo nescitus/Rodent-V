@@ -37,12 +37,12 @@
 //
 //   DATA WORD BIT LAYOUT (64 bits)
 //   --------------------------------
-//     bits  0-15  move  (int16)
-//     bits 16-31  score (int16, mate-adjusted)
-//     bits 32-39  depth (uint8)
-//     bits 40-47  bound (uint8)   UPPER=1 LOWER=2 EXACT=3
-//     bits 48-55  date  (uint8)   search generation 0-255
-//     bits 56-63  (reserved, zero)
+//     bits  0-15  move      (int16)
+//     bits 16-31  score     (int16, mate-adjusted)
+//     bits 32-39  depth     (uint8)
+//     bits 40-41  bound     (uint8)   UPPER=1 LOWER=2 EXACT=3
+//     bits 42-47  date      (uint8)   search generation 0-63
+//     bits 48-63  signature (uint16)  upper 16 bits of position key
 //
 //   REPLACEMENT POLICY
 //   ------------------
@@ -69,10 +69,9 @@ import (
 )
 
 // Entry is one slot in the transposition table.
-// Exactly 16 bytes (two aligned uint64s).
+// Exactly 8 bytes (a single uint64).
 type Entry struct {
-	data uint64 // packed payload (see bit layout above)
-	hash uint64 // position key XOR data (self-verifying)
+	data uint64 // packed payload and 16-bit signature
 }
 
 // Global TT state.
@@ -91,35 +90,24 @@ var searchStateSize = int64(unsafe.Sizeof(SearchState{}))
 
 // ---- Bit packing helpers ----
 
-func packTTData(move, score, depth, bound, date int) uint64 {
+func packTTData(key uint64, move, score, depth, bound, date int) uint64 {
 	return uint64(uint16(int16(move))) |
 		uint64(uint16(int16(score)))<<16 |
 		uint64(uint8(depth))<<32 |
 		uint64(uint8(bound))<<40 |
-		uint64(uint8(date))<<48
+		uint64(uint8(date&63))<<42 |
+		(key & 0xFFFF000000000000)
 }
 
 func unpackTTData(d uint64) (move, score, depth, bound, date int) {
 	move = int(int16(d))
 	score = int(int16(d >> 16))
 	depth = int(uint8(d >> 32))
-	bound = int(uint8(d >> 40))
-	date = int(uint8(d >> 48))
+	bound = int((d >> 40) & 3)
+	date = int((d >> 42) & 63)
 	return
 }
 
-// ---- Atomic entry access ----
-
-func loadEntry(e *Entry) (data, hash uint64) {
-	data = atomic.LoadUint64(&e.data)
-	hash = atomic.LoadUint64(&e.hash)
-	return
-}
-
-func storeEntry(e *Entry, key, data uint64) {
-	atomic.StoreUint64(&e.data, data)     // data first
-	atomic.StoreUint64(&e.hash, key^data) // then self-verifying key
-}
 
 // ---- TT management ----
 
@@ -131,8 +119,8 @@ func (t *TTable) alloc(mbSize int) {
 	for size <= mbSize {
 		size *= 2
 	}
-	// Each entry is 16 bytes; allocate (size/2) MiB worth.
-	newSize := ((size / 2) << 20) / 16
+	// Each entry is 8 bytes; allocate size MiB worth.
+	newSize := (size << 20) / 8
 
 	if t.size == newSize {
 		return // Size unchanged, don't reallocate or wipe the TT
@@ -154,7 +142,7 @@ func (t *TTable) clear() {
 }
 
 func (t *TTable) newDate() {
-	t.date = (t.date + 1) & 255
+	t.date = (t.date + 1) & 63
 }
 
 // hashfull returns TT utilization in UCI hashfull units (permille).
@@ -170,7 +158,7 @@ func (t *TTable) hashfull() int {
 			continue
 		}
 		_, _, _, _, date := unpackTTData(d)
-		age := (t.date - date) & 255
+		age := (t.date - date) & 63
 		if age <= 1 {
 			active++
 		}
@@ -230,8 +218,8 @@ func (t *TTable) probe(key uint64, move *int, score *int, flag *int, ttDepth *in
 	bucket := t.entries[base : base+4]
 	for i := range bucket {
 		e := &bucket[i]
-		data, hash := loadEntry(e)
-		if hash^data != key {
+		data := atomic.LoadUint64(&e.data)
+		if (data ^ key) & 0xFFFF000000000000 != 0 {
 			continue
 		}
 		mv, sc, dp, bd, _ := unpackTTData(data)
@@ -279,8 +267,8 @@ func (t *TTable) store(key uint64, move, score, bound, depth, ply int) {
 
 	for i := range bucket {
 		e := &bucket[i]
-		data, hash := loadEntry(e)
-		if hash^data == key {
+		data := atomic.LoadUint64(&e.data)
+		if (data ^ key) & 0xFFFF000000000000 == 0 {
 			// Reuse existing slot; preserve move if we have none.
 			if move == 0 {
 				mv, _, _, _, _ := unpackTTData(data)
@@ -290,7 +278,7 @@ func (t *TTable) store(key uint64, move, score, bound, depth, ply int) {
 			break
 		}
 		_, _, dp, _, dt := unpackTTData(data)
-		age := ((t.date-dt)&255)*256 + (255 - dp)
+		age := ((t.date-dt)&63)*256 + (255 - dp)
 		if age > oldest {
 			oldest = age
 			replace = e
@@ -300,6 +288,6 @@ func (t *TTable) store(key uint64, move, score, bound, depth, ply int) {
 		replace = &bucket[0]
 	}
 
-	d := packTTData(move, score, depth, bound, t.date)
-	storeEntry(replace, key, d)
+	d := packTTData(key, move, score, depth, bound, t.date)
+	atomic.StoreUint64(&replace.data, d)
 }
