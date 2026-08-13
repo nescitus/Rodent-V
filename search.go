@@ -694,6 +694,42 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			}
 		}
 
+		// Does the move give check?
+		givesCheck := moveGivesCheck(p, move)
+
+				// Late move pruning: skip quiet moves beyond the threshold.
+		// Moves that give check are exempt — they may be the only defence
+		// or the only way to continue a mating attack.
+		// When improving we allow more moves (position is trending up, so
+		// later moves are more likely to be relevant).
+		if depth < 10 { // table size limit
+
+			lmpThreshold := LMPnormalStep
+			if improving {
+				lmpThreshold = LMPimprovingStep
+			}
+
+			if useLmpTable {
+				lmpThreshold = lmp[0][depth]
+				if improving {
+					lmpThreshold = lmp[1][depth]
+				}
+			}
+			if useLMP && stage == StageQuiet && !isPv && !nodeInCheck && depth < LMPdepth &&
+				quietTried > lmpThreshold && !givesCheck {
+				continue
+			}
+		}
+
+		// Futility pruning: at shallow depth, skip late quiet moves that
+		// cannot plausibly raise alpha even with a generous margin.
+		if useFutility && stage == StageQuiet && !isPv && !nodeInCheck && !givesCheck &&
+			ss.excludedMove[ply] == 0 && depth <= fpMaxDepth &&
+			quietTried > 0 && !isMating(alpha) &&
+			staticEval+fpMargin*depth <= alpha {
+			continue
+		}
+
 		// --- Singular extension ---
 		// When the TT move is reliable and deep enough, check if it's the
 		// only good move by searching without it at reduced depth. If all
@@ -782,49 +818,11 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// p.side has flipped after making a move, so the mover was p.side^1.
 		ss.recordContHistContext(ply, p.side^1, movedPiece, moveTo(move))
 
-		// Does the move give check?
-		givesCheck := p.inCheck()
-
 		// Extend by one ply for moves that give check, plus singular extension.
 		newDepth := depth - 1 + extension
 
 		if givesCheck {
 			newDepth++
-		}
-
-		// Late move pruning: skip quiet moves beyond the threshold.
-		// Moves that give check are exempt — they may be the only defence
-		// or the only way to continue a mating attack.
-		// When improving we allow more moves (position is trending up, so
-		// later moves are more likely to be relevant).
-		if depth < 10 { // table size limit
-
-			lmpThreshold := LMPnormalStep
-			if improving {
-				lmpThreshold = LMPimprovingStep
-			}
-
-			if useLmpTable {
-				lmpThreshold = lmp[0][depth]
-				if improving {
-					lmpThreshold = lmp[1][depth]
-				}
-			}
-			if useLMP && stage == StageQuiet && !isPv && !nodeInCheck && depth < LMPdepth &&
-				quietTried > lmpThreshold && !givesCheck {
-				ss.undoMove(p, ply)
-				continue
-			}
-		}
-
-		// Futility pruning: at shallow depth, skip late quiet moves that
-		// cannot plausibly raise alpha even with a generous margin.
-		if useFutility && stage == StageQuiet && !isPv && !nodeInCheck && !givesCheck &&
-			ss.excludedMove[ply] == 0 && depth <= fpMaxDepth &&
-			quietTried > 0 && !isMating(alpha) &&
-			staticEval+fpMargin*depth <= alpha {
-			ss.undoMove(p, ply)
-			continue
 		}
 
 		// We are about to move. Prepare NNUE accumulator
