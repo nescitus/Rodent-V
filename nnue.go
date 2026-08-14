@@ -110,6 +110,10 @@ type addSingleFunc func(
 	a, w *int16,
 )
 
+type subSingleFunc func(
+	a, w *int16,
+)
+
 type captureFunc func(
 	a0, a1 *int16,
 	wTo0, wFrom0, wCap0 *int16,
@@ -135,6 +139,7 @@ type evalFunc func(
 )
 
 var addSingleFunction addSingleFunc
+var subSingleFunction subSingleFunc
 var captureFunction captureFunc
 var moveFunction moveFunc
 var castleFunction castleFunc
@@ -144,6 +149,7 @@ var evalFunction evalFunc
 func init() {
 	// Safe fallback.
 	addSingleFunction = addSingleScalar
+	subSingleFunction = subSingleScalar
 	moveFunction = moveScalar
 	captureFunction = captureScalar
 	castleFunction = castleScalar
@@ -438,7 +444,7 @@ func (acc *Accumulator) promotionCapture(color, from, to, prom, captType int, k0
 }
 
 // apply full nnue accumulator update
-func (acc *Accumulator) applyPendingChanges(p *Pos, u *Update) {
+func (acc *Accumulator) applyPendingChanges(p *Pos, u *Update, ss *SearchState) {
 
 	// already applied
 	if !u.dirty {
@@ -480,13 +486,89 @@ func (acc *Accumulator) applyPendingChanges(p *Pos, u *Update) {
 	}
 
 	if refresh0 {
-		refreshPerspective(p, acc, 0)
+		if ss != nil {
+			ss.refreshPerspectiveWithFinny(p, acc, 0)
+		} else {
+			refreshPerspective(p, acc, 0)
+		}
 	}
 	if refresh1 {
-		refreshPerspective(p, acc, 1)
+		if ss != nil {
+			ss.refreshPerspectiveWithFinny(p, acc, 1)
+		} else {
+			refreshPerspective(p, acc, 1)
+		}
 	}
 
 	u.dirty = false
+}
+
+func (ss *SearchState) refreshPerspectiveWithFinny(p *Pos, acc *Accumulator, perspective int) {
+	kSq := p.kingSq[perspective]
+	mirror := 0
+	if singleOptionValue[HorizontalMirroring] == 1 && kSq%8 > 3 {
+		mirror = 1
+	}
+
+	entry := &ss.finny[perspective][mirror]
+
+	if !entry.valid {
+		// Initialize accumulator from biases
+		copy(entry.acc[:NNUEHiddenSize], nnueParams.InputBiases[:NNUEHiddenSize])
+		entryAccPtr := &entry.acc[0]
+
+		for pc := 0; pc < 12; pc++ {
+			c := colorOf(pc)
+			pt := typeOf(pc)
+			bb := p.colorBB[c] & p.typeBB[pt]
+			entry.pieces[pc] = bb
+
+			for bb != 0 {
+				sq := bits.TrailingZeros64(bb)
+				bb &= bb - 1
+				idx := featureIndex(c, pt, sq, kSq, perspective)
+				w := &nnueParams.InputWeights[idx][0]
+				addSingleFunction(entryAccPtr, w)
+			}
+		}
+		entry.valid = true
+	} else {
+		entryAccPtr := &entry.acc[0]
+		for pc := 0; pc < 12; pc++ {
+			c := colorOf(pc)
+			pt := typeOf(pc)
+			currBB := p.colorBB[c] & p.typeBB[pt]
+			prevBB := entry.pieces[pc]
+			diff := currBB ^ prevBB
+			if diff == 0 {
+				continue
+			}
+
+			// Added pieces
+			added := diff & currBB
+			for added != 0 {
+				sq := bits.TrailingZeros64(added)
+				added &= added - 1
+				idx := featureIndex(c, pt, sq, kSq, perspective)
+				w := &nnueParams.InputWeights[idx][0]
+				addSingleFunction(entryAccPtr, w)
+			}
+
+			// Removed pieces
+			removed := diff & prevBB
+			for removed != 0 {
+				sq := bits.TrailingZeros64(removed)
+				removed &= removed - 1
+				idx := featureIndex(c, pt, sq, kSq, perspective)
+				w := &nnueParams.InputWeights[idx][0]
+				subSingleFunction(entryAccPtr, w)
+			}
+
+			entry.pieces[pc] = currBB
+		}
+	}
+
+	copy(acc.values[perspective][:NNUEHiddenSize], entry.acc[:NNUEHiddenSize])
 }
 
 func refreshPerspective(p *Pos, acc *Accumulator, perspective int) {

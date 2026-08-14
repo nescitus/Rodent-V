@@ -76,6 +76,15 @@ type SearchState struct {
 	nonPawnCorrHist [2][2][corrHistSize]int16 // non-pawn correction history
 	minorCorrHist   [2][2][corrHistSize]int16 // knight-bishop-king correction history
 	majorCorrHist   [2][2][corrHistSize]int16 // rook-queen-king correction history
+
+	// ---- NNUE Finny Cache (cached accumulator per perspective & mirror) ----
+	finny [2][2]FinnyEntry // [perspective][mirror]
+}
+
+type FinnyEntry struct {
+	acc    [NNUEHiddenSize]int16
+	pieces [12]uint64
+	valid  bool
 }
 
 // State destroyed by makeMove.
@@ -151,6 +160,7 @@ func (ss *SearchState) resetForSearch(p *Pos) {
 	ss.excludedRootMoves = ss.excludedRootMoves[:0]
 
 	ss.isUsingNNUE = nnue.Loaded && singleOptionValue[NnuePerc] > 0
+	ss.finny = [2][2]FinnyEntry{}
 
 	// KBN vs K: switch to pure HCE so checkmateHelper's corner-driving
 	// tables are used instead of NNUE, which has no understanding of the

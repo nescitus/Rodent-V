@@ -11,7 +11,11 @@ type ViriBuffer struct {
 }
 
 func (vb *ViriBuffer) Reset() {
-	vb.buf = vb.buf[:0]
+	if cap(vb.buf) < 32+512*4+4 {
+		vb.buf = make([]byte, 0, 32+512*4+4)
+	} else {
+		vb.buf = vb.buf[:0]
+	}
 }
 
 // WriteBoard packs the starting board state into 32 bytes and appends it to the buffer.
@@ -93,15 +97,15 @@ func (vb *ViriBuffer) WriteMoveEval(move int, eval int) {
 		vType = 2
 		if fr < 32 { // White
 			if to > fr {
-				to = G1
+				to = H1
 			} else {
-				to = C1
+				to = A1
 			}
 		} else { // Black
 			if to > fr {
-				to = G8
+				to = H8
 			} else {
-				to = C8
+				to = A8
 			}
 		}
 	} else if mType >= N_PROM {
