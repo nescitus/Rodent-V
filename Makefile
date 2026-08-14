@@ -4,9 +4,12 @@ ifeq ($(OS),Windows_NT)
 	EXE := $(EXE).exe
 endif
 
-.PHONY: all build clean windows linux
+.PHONY: all build clean windows linux AVX2
 
 all: build
+
+# OpenBench builds using cpuflags as targets (e.g., 'make AVX2')
+AVX2: build
 
 # Default build (uses host OS)
 build:
