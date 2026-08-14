@@ -13,6 +13,17 @@ func addSingleScalar(
 	}
 }
 
+func subSingleScalar(
+	a, w *int16,
+) {
+	acc := unsafe.Slice(a, NNUEHiddenSize)
+	ww := unsafe.Slice(w, NNUEHiddenSize)
+
+	for i := 0; i < NNUEHiddenSize; i++ {
+		acc[i] -= ww[i]
+	}
+}
+
 func addScalar(
 	a0, a1 *int16,
 	w0, w1 *int16,

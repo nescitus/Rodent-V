@@ -517,7 +517,7 @@ func applyMoves(p *Pos, moveStrs []string) {
 		var r Revert
 
 		makeMove(p, &u, &r, move)
-		acc.applyPendingChanges(p, &u)
+		acc.applyPendingChanges(p, &u, nil)
 
 		if p.clock == 0 {
 			p.histLen = 0

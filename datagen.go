@@ -134,7 +134,8 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 		quietCount := genQuiet(&p, list[capCount:])
 		total := capCount + quietCount
 
-		var legals []int
+		var legals [maxMoves]int
+		legalCount := 0
 		for j := 0; j < total; j++ {
 			move := list[j]
 			var child Pos = p
@@ -142,13 +143,14 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 			var r Revert
 			makeMove(&child, &u, &r, move)
 			if !child.selfInCheck() {
-				legals = append(legals, move)
+				legals[legalCount] = move
+				legalCount++
 			}
 		}
-		if len(legals) == 0 {
+		if legalCount == 0 {
 			return ViriBuffer{}, 0, false
 		}
-		move := legals[rng.Intn(len(legals))]
+		move := legals[rng.Intn(legalCount)]
 		var u Update
 		var r Revert
 		makeMove(&p, &u, &r, move)
@@ -161,42 +163,15 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 	refresh(&p, &ss.accStack[0])
 
 	var vb ViriBuffer
+	vb.Reset()
 	vb.WriteBoard(&p, p.clock, 1)
 
 	var numEntries int
 	drawCount := 0
+	resignCount := 0
 	var result float64 = 0.5 // 0.5 for draw, 1.0 for White win, 0.0 for Black win
 
 	for ply := 0; ply < 512; ply++ {
-		var list [maxMoves]int
-		capCount := genCaptures(&p, list[:])
-		quietCount := genQuiet(&p, list[capCount:])
-		total := capCount + quietCount
-
-		hasLegal := false
-		for j := 0; j < total; j++ {
-			move := list[j]
-			var child Pos = p
-			var u Update
-			var r Revert
-			makeMove(&child, &u, &r, move)
-			if !child.selfInCheck() {
-				hasLegal = true
-				break
-			}
-		}
-
-		if !hasLegal {
-			if p.inCheck() {
-				if p.side == White {
-					result = 0.0 // Black wins
-				} else {
-					result = 1.0 // White wins
-				}
-			}
-			break
-		}
-
 		if p.isInsufficientMaterial() || p.clock >= 100 || isRepetitionDG(&p) {
 			result = 0.5
 			break
@@ -204,6 +179,15 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 
 		bestMove, score := runDatagenSearch(&p, ss, nodesPerMove)
 		if bestMove == 0 {
+			if p.inCheck() {
+				if p.side == White {
+					result = 0.0 // Black wins
+				} else {
+					result = 1.0 // White wins
+				}
+			} else {
+				result = 0.5 // Stalemate
+			}
 			break
 		}
 
@@ -214,8 +198,14 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 		vb.WriteMoveEval(bestMove, whiteScore)
 		numEntries++
 
-		if score > -30000 && score < 30000 {
-			if score > -10 && score < 10 {
+		absScore := score
+		if absScore < 0 {
+			absScore = -absScore
+		}
+
+		if absScore < 30000 {
+			// Draw adjudication
+			if absScore <= 10 {
 				drawCount++
 			} else {
 				drawCount = 0
@@ -223,6 +213,29 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 			if drawCount >= 10 && ply >= 40 {
 				result = 0.5
 				break
+			}
+
+			// Resignation / overwhelming lead adjudication
+			if absScore > 1500 {
+				resignCount++
+				if resignCount >= 3 {
+					if score > 0 {
+						if p.side == White {
+							result = 1.0
+						} else {
+							result = 0.0
+						}
+					} else {
+						if p.side == White {
+							result = 0.0
+						} else {
+							result = 1.0
+						}
+					}
+					break
+				}
+			} else {
+				resignCount = 0
 			}
 		}
 
@@ -232,7 +245,9 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 		if p.clock == 0 {
 			p.histLen = 0
 		}
-		refresh(&p, &ss.accStack[0])
+		if ss.isUsingNNUE {
+			ss.accStack[0].applyPendingChanges(&p, &u, ss)
+		}
 	}
 
 	if numEntries == 0 {
@@ -267,18 +282,45 @@ func isRepetitionDG(p *Pos) bool {
 func runDatagenSearch(p *Pos, ss *SearchState, softNodesLimit int) (int, int) {
 	ss.resetForSearch(p)
 
-	// HARD nodes limit checked mid-search (8 million nodes)
-	ss.nodesLimit = 8000000
-	refresh(p, &ss.accStack[0])
+	// Capped soft limit: cap search at 1.5x - 2x soft limit to prevent pathological node explosions
+	hardLimit := int64(softNodesLimit) * 3 / 2
+	if hardLimit < 7500 {
+		hardLimit = 7500
+	}
+	ss.nodesLimit = hardLimit
 
 	var pv [maxPly]int
 	score := 0
 	bestMove := 0
 
 	for d := 1; d < 100; d++ {
-		iterScore := ss.search(p, 0, -inf, inf, d, false, pv[:], false)
+		var iterScore int
 
-		// If we hit the 8M hard limit mid-search, we discard this depth's result
+		if d < 5 {
+			iterScore = ss.search(p, 0, -inf, inf, d, false, pv[:], false)
+		} else {
+			delta := 25 + score*score/16384
+			alpha := max(-inf, score-delta)
+			beta := min(inf, score+delta)
+
+			for {
+				iterScore = ss.search(p, 0, alpha, beta, d, false, pv[:], false)
+				if ss.isAbortingSearch() {
+					break
+				}
+				if iterScore <= alpha {
+					beta = (alpha + beta) / 2
+					alpha = max(-inf, alpha-delta)
+				} else if iterScore >= beta {
+					beta = min(inf, beta+delta)
+				} else {
+					break
+				}
+				delta += delta / 2
+			}
+		}
+
+		// If we hit the hard limit mid-search, break and retain previous completed iteration
 		if ss.isAbortingSearch() {
 			break
 		}
@@ -288,13 +330,13 @@ func runDatagenSearch(p *Pos, ss *SearchState, softNodesLimit int) (int, int) {
 			bestMove = pv[0]
 		}
 
-		// SOFT nodes limit checked only AFTER an iteration finishes
+		// SOFT nodes limit checked AFTER an iteration finishes
 		if ss.nodes >= int64(softNodesLimit) {
 			break
 		}
 	}
 
-	// Reset the nodes limit to 0 so the subsequent quiesce filter doesn't instantly abort
+	// Reset nodesLimit to 0
 	ss.nodesLimit = 0
 
 	return bestMove, score

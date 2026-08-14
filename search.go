@@ -623,7 +623,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			// and update it, since we know a move is legal.
 			if ss.isUsingNNUE {
 				childAcc := ss.prepareChildAccumulator(ply)
-				childAcc.applyPendingChanges(p, u)
+				childAcc.applyPendingChanges(p, u, ss)
 			}
 
 			score = -ss.quiesce(p, ply+1, -probcutBeta, -probcutBeta+1, probcutPv[:])
@@ -831,7 +831,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		if ss.isUsingNNUE {
 			childAcc := ss.prepareChildAccumulator(ply)
-			childAcc.applyPendingChanges(p, u)
+			childAcc.applyPendingChanges(p, u, ss)
 		}
 
 		// Count quiet moves
@@ -1189,7 +1189,7 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		// for the next ply and update it since we know move is legal
 		if ss.isUsingNNUE {
 			childAcc := ss.prepareChildAccumulator(ply)
-			childAcc.applyPendingChanges(p, u)
+			childAcc.applyPendingChanges(p, u, ss)
 		}
 
 		score := -ss.quiesce(p, ply+1, -beta, -alpha, childPv[:])
