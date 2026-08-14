@@ -36,7 +36,7 @@ import (
 var embeddedNet []byte
 
 // NNUE size and scale. AVX2 code supports following net sizes:
-// 64, 128, 256, 384, 512
+// 64, 128, 256, 384, 512, 768
 const (
 	NNUEInputSize  = 768
 	NNUEHiddenSize = 512
@@ -184,6 +184,13 @@ func init() {
 		castleFunction = castleAVX2_512
 		evalFunction = getEvalAVX2_512
 		addSingleFunction = addSingleAVX2_512
+
+	case 768:
+		moveFunction = moveAVX2_768
+		captureFunction = captureAVX2_768
+		castleFunction = castleAVX2_768
+		evalFunction = getEvalAVX2_768
+		addSingleFunction = addSingleAVX2_768		
 
 	default:
 		panic("unsupported NNUE hidden size")
