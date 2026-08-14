@@ -165,24 +165,32 @@ func init() {
 		captureFunction = captureAVX2_64
 		castleFunction = castleAVX2_64
 		evalFunction = getEvalAVX2_64
+		addSingleFunction = addSingleAVX2_64
+		subSingleFunction = subSingleAVX2_64
 
 	case 128:
 		moveFunction = moveAVX2_128
 		captureFunction = captureAVX2_128
 		castleFunction = castleAVX2_128
 		evalFunction = getEvalAVX2_128
+		addSingleFunction = addSingleAVX2_128
+		subSingleFunction = subSingleAVX2_128
 
 	case 256:
 		moveFunction = moveAVX2_256
 		captureFunction = captureAVX2_256
 		castleFunction = castleAVX2_256
 		evalFunction = getEvalAVX2_256
+		addSingleFunction = addSingleAVX2_256
+		subSingleFunction = subSingleAVX2_256
 
 	case 384:
 		moveFunction = moveAVX2_384
 		captureFunction = captureAVX2_384
 		castleFunction = castleAVX2_384
 		evalFunction = getEvalAVX2_384
+		addSingleFunction = addSingleAVX2_384
+		subSingleFunction = subSingleAVX2_384
 
 	case 512:
 		moveFunction = moveAVX2_512
@@ -190,13 +198,15 @@ func init() {
 		castleFunction = castleAVX2_512
 		evalFunction = getEvalAVX2_512
 		addSingleFunction = addSingleAVX2_512
+		subSingleFunction = subSingleAVX2_512
 
 	case 768:
 		moveFunction = moveAVX2_768
 		captureFunction = captureAVX2_768
 		castleFunction = castleAVX2_768
 		evalFunction = getEvalAVX2_768
-		addSingleFunction = addSingleAVX2_768		
+		addSingleFunction = addSingleAVX2_768
+		subSingleFunction = subSingleAVX2_768
 
 	default:
 		panic("unsupported NNUE hidden size")

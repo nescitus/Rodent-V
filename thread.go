@@ -44,11 +44,15 @@ type SearchState struct {
 	staticEval EvalFunc
 
 	// ---- Progress (reset each think) ----
-	nodes       int64 // nodes searched by this thread
-	nodesLimit  int64 // max nodes to search before aborting (0 = no limit)
-	selDepth    int   // maximum ply reached this search
-	searchStart int64 // Unix ms at the start of think()
-	rootHistLen int   // p.histLen when think() began (repetition detection)
+	nodes          int64 // nodes searched by this thread
+	nodesLimit     int64 // max nodes to search before aborting (0 = no limit)
+	aborting       bool  // thread-local cached abort flag to avoid atomic contention
+	selDepth       int   // maximum ply reached this search
+	searchStart    int64 // Unix ms at the start of think()
+	rootHistLen    int   // p.histLen when think() began (repetition detection)
+	completedDepth int   // last completed depth for thread voting
+	completedScore int   // score from last completed depth
+	completedMove  int   // best move from last completed depth
 
 	// ---- MultiPV State ----
 	multiPVIdx        int   // current multipv index (1-based)
@@ -144,6 +148,10 @@ func (ss *SearchState) clearHistory() {
 // per-ply context, and killers (which are root-position specific).
 func (ss *SearchState) resetForSearch(p *Pos) {
 	ss.nodes = 0
+	ss.aborting = false
+	ss.completedDepth = 0
+	ss.completedScore = 0
+	ss.completedMove = 0
 	ss.selDepth = 0
 	ss.searchStart = time.Now().UnixMilli()
 	ss.rootHistLen = p.histLen

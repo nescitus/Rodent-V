@@ -2,13 +2,42 @@
 
 package main
 
-// ADD
+// ADD / SUB SINGLE
+//go:noescape
+func addSingleAVX2_64(a, w *int16)
+
+//go:noescape
+func subSingleAVX2_64(a, w *int16)
+
+//go:noescape
+func addSingleAVX2_128(a, w *int16)
+
+//go:noescape
+func subSingleAVX2_128(a, w *int16)
+
+//go:noescape
+func addSingleAVX2_256(a, w *int16)
+
+//go:noescape
+func subSingleAVX2_256(a, w *int16)
+
+//go:noescape
+func addSingleAVX2_384(a, w *int16)
+
+//go:noescape
+func subSingleAVX2_384(a, w *int16)
 
 //go:noescape
 func addSingleAVX2_512(a, w *int16)
 
 //go:noescape
+func subSingleAVX2_512(a, w *int16)
+
+//go:noescape
 func addSingleAVX2_768(a, w *int16)
+
+//go:noescape
+func subSingleAVX2_768(a, w *int16)
 
 // CAPTURE
 

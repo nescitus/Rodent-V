@@ -43,21 +43,13 @@ func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 		}
 	}
 
-	filename := fmt.Sprintf("data_%d.vf", time.Now().UnixNano())
-	file, err := os.Create(filename)
-	if err != nil {
-		fmt.Println("Error creating file:", err)
-		return
-	}
-	defer file.Close()
-
+	baseTimestamp := time.Now().UnixNano()
 	var totalPositions int64 = 0
 	var totalGames int64 = 0
-	var fileMutex sync.Mutex
 	var wg sync.WaitGroup
 	startTime := time.Now()
 
-	fmt.Printf("Writing viriformat binary to %s\n", filename)
+	fmt.Printf("Writing lock-free viriformat binaries per thread (prefix: data_%d_t*.vf)\n", baseTimestamp)
 
 	done := make(chan bool)
 	go func() {
@@ -84,6 +76,17 @@ func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 		wg.Add(1)
 		go func(threadID int) {
 			defer wg.Done()
+			threadFilename := fmt.Sprintf("data_%d_t%d.vf", baseTimestamp, threadID)
+			file, err := os.Create(threadFilename)
+			if err != nil {
+				fmt.Printf("Error creating thread file %s: %v\n", threadFilename, err)
+				return
+			}
+			defer file.Close()
+
+			writer := bufio.NewWriterSize(file, 64*1024)
+			defer writer.Flush()
+
 			rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(threadID)))
 			ss := new(SearchState)
 			ss.tt = new(TTable)
@@ -103,9 +106,7 @@ func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 				atomic.AddInt64(&totalPositions, int64(posCount))
 				atomic.AddInt64(&totalGames, 1)
 
-				fileMutex.Lock()
-				file.Write(vb.buf)
-				fileMutex.Unlock()
+				writer.Write(vb.buf)
 			}
 		}(i)
 	}

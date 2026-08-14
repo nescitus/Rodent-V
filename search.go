@@ -188,19 +188,56 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 			h.tt = &mainTT
 			states[i] = h
 		}
-		h.clearHistory()
 		h.resetForSearch(p)
 		refresh(p, &h.accStack[0])
 		h.searchStart = ss.searchStart // helpers share the same clock origin
 		pCopy := *p
+		threadID := i
 		wg.Add(1)
-		go func(hs *SearchState, pos Pos) {
+		go func(hs *SearchState, pos Pos, id int) {
 			defer wg.Done()
-			var dummyPV [maxPly]int
-			for d := 1; atomic.LoadInt32(&abortFlag) == 0; d++ {
-				hs.search(&pos, 0, -inf, inf, d, false, dummyPV[:], false)
+			var pv [maxPly]int
+			score := 0
+			startDepth := 1 + (id % 2)
+
+			for d := startDepth; atomic.LoadInt32(&abortFlag) == 0 && d <= maxDepth; d++ {
+				var iterScore int
+				if d < 5 {
+					iterScore = hs.search(&pos, 0, -inf, inf, d, false, pv[:], false)
+				} else {
+					delta := 25 + score*score/16384
+					alpha := max(-inf, score-delta)
+					beta := min(inf, score+delta)
+
+					for {
+						iterScore = hs.search(&pos, 0, alpha, beta, d, false, pv[:], false)
+						if hs.isAbortingSearch() {
+							break
+						}
+						if iterScore <= alpha {
+							beta = (alpha + beta) / 2
+							alpha = max(-inf, alpha-delta)
+						} else if iterScore >= beta {
+							beta = min(inf, beta+delta)
+						} else {
+							break
+						}
+						delta += delta / 2
+					}
+				}
+
+				if hs.isAbortingSearch() {
+					break
+				}
+
+				if pv[0] != 0 {
+					score = iterScore
+					hs.completedDepth = d
+					hs.completedScore = score
+					hs.completedMove = pv[0]
+				}
 			}
-		}(h, pCopy)
+		}(h, pCopy, threadID)
 	}
 
 	numPV := singleOptionValue[MultiPV]
@@ -314,11 +351,17 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 			}
 		}
 
-		if pvs[0][0] != 0 && pvs[0][0] == lastBestMove {
-			bestMoveStability++
-		} else {
-			bestMoveStability = 1
-			lastBestMove = pvs[0][0]
+		if pvs[0][0] != 0 {
+			ss.completedDepth = rootDepth
+			ss.completedScore = scores[0]
+			ss.completedMove = pvs[0][0]
+
+			if pvs[0][0] == lastBestMove {
+				bestMoveStability++
+			} else {
+				bestMoveStability = 1
+				lastBestMove = pvs[0][0]
+			}
 		}
 	}
 
@@ -326,10 +369,19 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 	atomic.StoreInt32(&abortFlag, 1)
 	wg.Wait()
 
-	if pvs[0][0] != 0 {
-		best := moveToStr(pvs[0][0])
-		if pvs[0][1] != 0 {
-			ponder := moveToStr(pvs[0][1])
+	bestMove, _, _ := selectBestThreadMove(states, numThreads)
+	if bestMove == 0 {
+		bestMove = pvs[0][0]
+	}
+
+	if bestMove != 0 {
+		best := moveToStr(bestMove)
+		ponderMove := 0
+		if bestMove == pvs[0][0] && pvs[0][1] != 0 {
+			ponderMove = pvs[0][1]
+		}
+		if ponderMove != 0 {
+			ponder := moveToStr(ponderMove)
 			fmt.Printf("bestmove %s ponder %s\n", best, ponder)
 		} else {
 			fmt.Printf("bestmove %s\n", best)
@@ -337,6 +389,69 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 	} else {
 		fmt.Println("bestmove 0000")
 	}
+}
+
+// selectBestThreadMove tallies depth-and-score weighted votes across all active threads.
+func selectBestThreadMove(states []*SearchState, activeCount int) (int, int, int) {
+	if activeCount <= 1 || len(states) == 0 || states[0] == nil {
+		if len(states) > 0 && states[0] != nil {
+			return states[0].completedMove, states[0].completedScore, states[0].completedDepth
+		}
+		return 0, 0, 0
+	}
+
+	minScore := 999999
+	hasValidThread := false
+	for i := 0; i < activeCount && i < len(states); i++ {
+		st := states[i]
+		if st == nil || st.completedDepth == 0 || st.completedMove == 0 {
+			continue
+		}
+		hasValidThread = true
+		if st.completedScore < minScore {
+			minScore = st.completedScore
+		}
+	}
+
+	if !hasValidThread {
+		return states[0].completedMove, states[0].completedScore, states[0].completedDepth
+	}
+
+	type moveVote struct {
+		weight int64
+		thread int
+	}
+	votes := make(map[int]moveVote)
+	bestMove := states[0].completedMove
+	var maxWeight int64 = -1
+
+	for i := 0; i < activeCount && i < len(states); i++ {
+		st := states[i]
+		if st == nil || st.completedDepth == 0 || st.completedMove == 0 {
+			continue
+		}
+
+		mv := st.completedMove
+		weight := int64(st.completedScore-minScore+50) * int64(st.completedDepth)
+
+		entry := votes[mv]
+		entry.weight += weight
+		if entry.thread == 0 || st.completedDepth > states[entry.thread].completedDepth {
+			entry.thread = i
+		}
+		votes[mv] = entry
+
+		if entry.weight > maxWeight {
+			maxWeight = entry.weight
+			bestMove = mv
+		}
+	}
+
+	bestThread := votes[bestMove].thread
+	if bestThread >= 0 && bestThread < len(states) && states[bestThread] != nil {
+		return bestMove, states[bestThread].completedScore, states[bestThread].completedDepth
+	}
+	return bestMove, states[0].completedScore, states[0].completedDepth
 }
 
 // rankPVsByScore reorders the first n entries of pvs/scores so they are
@@ -1307,10 +1422,12 @@ func (ss *SearchState) reportInfo(score int, pv []int) {
 }
 
 // checkTime tests periodically (every 1024 nodes) whether
-// the allocated time has expired.  If so, it sets abortFlag so the
-// search unwinds cleanly.  Skipped during depth-1 searches (the
-// engine must always return at least one move) and when pondering.
+// the allocated time has expired or search should abort.
 func (ss *SearchState) checkTime() {
+	if ss.nodesLimit > 0 && ss.nodes >= ss.nodesLimit {
+		ss.aborting = true
+		return
+	}
 
 	if datagenMode {
 		return
@@ -1320,15 +1437,25 @@ func (ss *SearchState) checkTime() {
 		return
 	}
 
+	// Check global abort flag periodically to avoid atomic contention on every node
+	if atomic.LoadInt32(&abortFlag) != 0 {
+		ss.aborting = true
+		return
+	}
+
 	// Nodes limit for weaker personalities
 	if singleOptionValue[NodesLimit] > 0 && ss.nodes >= int64(singleOptionValue[NodesLimit]) {
 		atomic.StoreInt32(&abortFlag, 1)
+		ss.aborting = true
+		return
 	}
 
 	// Timeout
 	if !pondering && hardTimeLimit >= 0 {
 		if time.Now().UnixMilli()-ss.searchStart >= hardTimeLimit {
 			atomic.StoreInt32(&abortFlag, 1)
+			ss.aborting = true
+			return
 		}
 	}
 }
@@ -1379,13 +1506,7 @@ func isMateScore(score int) bool {
 
 // Are we in the process of aborting search?
 func (ss *SearchState) isAbortingSearch() bool {
-	// For datagen
-	if ss.nodesLimit > 0 && ss.nodes >= ss.nodesLimit {
-		return true
-	}
-
-	// Timeout
-	return atomic.LoadInt32(&abortFlag) != 0
+	return ss.aborting
 }
 
 // Is search stack about to overflow?

@@ -1,49 +1,176 @@
 #include "textflag.h"
 
-// func addSingleAVX2_512(
-//     a, w *int16,
-// )
-//
-// Add one feature row to one accumulator perspective:
-//
-//     a[i] += w[i]
-//
-// 512 int16 neurons = 1024 bytes.
-// Each loop iteration processes 16 neurons = 32 bytes.
+// 64 neurons = 128 bytes
+TEXT ·addSingleAVX2_64(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+addsingle64_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPADDW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $128
+	JB addsingle64_loop
+	VZEROUPPER
+	RET
+
+TEXT ·subSingleAVX2_64(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+subsingle64_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPSUBW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $128
+	JB subsingle64_loop
+	VZEROUPPER
+	RET
+
+// 128 neurons = 256 bytes
+TEXT ·addSingleAVX2_128(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+addsingle128_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPADDW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $256
+	JB addsingle128_loop
+	VZEROUPPER
+	RET
+
+TEXT ·subSingleAVX2_128(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+subsingle128_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPSUBW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $256
+	JB subsingle128_loop
+	VZEROUPPER
+	RET
+
+// 256 neurons = 512 bytes
+TEXT ·addSingleAVX2_256(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+addsingle256_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPADDW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $512
+	JB addsingle256_loop
+	VZEROUPPER
+	RET
+
+TEXT ·subSingleAVX2_256(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+subsingle256_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPSUBW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $512
+	JB subsingle256_loop
+	VZEROUPPER
+	RET
+
+// 384 neurons = 768 bytes
+TEXT ·addSingleAVX2_384(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+addsingle384_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPADDW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $768
+	JB addsingle384_loop
+	VZEROUPPER
+	RET
+
+TEXT ·subSingleAVX2_384(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+subsingle384_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPSUBW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $768
+	JB subsingle384_loop
+	VZEROUPPER
+	RET
+
+// 512 neurons = 1024 bytes
 TEXT ·addSingleAVX2_512(SB), NOSPLIT, $0-16
 	MOVQ a+0(FP), AX
 	MOVQ w+8(FP), CX
-
 	XORQ R8, R8
-
 addsingle512_loop:
 	VMOVDQU (AX)(R8*1), Y0
 	VPADDW  (CX)(R8*1), Y0, Y0
 	VMOVDQU Y0, (AX)(R8*1)
-
 	ADDQ $32, R8
 	CMPQ R8, $1024
 	JB addsingle512_loop
-
 	VZEROUPPER
 	RET
 
-// version for 768 neurons
+TEXT ·subSingleAVX2_512(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+subsingle512_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPSUBW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $1024
+	JB subsingle512_loop
+	VZEROUPPER
+	RET
+
+// 768 neurons = 1536 bytes
 TEXT ·addSingleAVX2_768(SB), NOSPLIT, $0-16
 	MOVQ a+0(FP), AX
 	MOVQ w+8(FP), CX
-
 	XORQ R8, R8
-
 addsingle768_loop:
 	VMOVDQU (AX)(R8*1), Y0
 	VPADDW  (CX)(R8*1), Y0, Y0
 	VMOVDQU Y0, (AX)(R8*1)
-
 	ADDQ $32, R8
 	CMPQ R8, $1536
 	JB addsingle768_loop
+	VZEROUPPER
+	RET
 
+TEXT ·subSingleAVX2_768(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+subsingle768_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPSUBW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+	ADDQ $32, R8
+	CMPQ R8, $1536
+	JB subsingle768_loop
 	VZEROUPPER
 	RET
 
