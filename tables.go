@@ -475,6 +475,11 @@ func initTables() {
 			if lineMask != 0 {
 				LineBB[sq1][sq2] = lineMask
 				
+				if sq1 == sq2 {
+					BetweenBB[sq1][sq2] = 0
+					continue
+				}
+				
 				// BetweenBB is the intersection of attacks from sq1 (with sq2 as blocker) 
 				// and attacks from sq2 (with sq1 as blocker)
 				var atk1, atk2 uint64

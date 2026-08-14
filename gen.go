@@ -281,18 +281,59 @@ func genQuiet(p *Pos, list []int) int {
 	// Requirements: castling rights present, intervening squares empty,
 	// king and passing square not under attack.
 	if side == White {
-		// Kingside: E1->G1; F1, G1 must be empty; E1 and F1 not attacked.
-		if p.castleRights&wKingsideCastle != 0 && occ&0x0000000000000060 == 0 {
-			if !isAttacked(p, E1, Black) && !isAttacked(p, F1, Black) {
-				list[n] = (CASTLE << 12) | (G1 << 6) | E1
-				n++
+		kingSq := p.kingSq[White]
+		// Kingside
+		if p.castleRights&wKingsideCastle != 0 {
+			rookSq := p.castlingRookSq[White][0]
+			kingDst := G1
+			rookDst := F1
+			
+			castleOcc := occ &^ (squareBit(kingSq) | squareBit(rookSq))
+			clearMask := BetweenBB[kingSq][kingDst] | BetweenBB[kingSq][rookSq] | squareBit(kingDst) | squareBit(rookDst)
+			checkMask := BetweenBB[kingSq][kingDst] | squareBit(kingDst)
+			
+			if castleOcc&clearMask == 0 {
+				safe := true
+				bb := checkMask
+				for bb != 0 {
+					sq := lsb(bb)
+					if isAttacked(p, sq, Black) {
+						safe = false
+						break
+					}
+					bb &= bb - 1
+				}
+				if safe && !isAttacked(p, kingSq, Black) { // Not in check
+					list[n] = (CASTLE << 12) | (rookSq << 6) | kingSq
+					n++
+				}
 			}
 		}
-		// Queenside: E1->C1; B1, C1, D1 must be empty; E1 and D1 not attacked.
-		if p.castleRights&wQueensideCastle != 0 && occ&0x000000000000000E == 0 {
-			if !isAttacked(p, E1, Black) && !isAttacked(p, D1, Black) {
-				list[n] = (CASTLE << 12) | (C1 << 6) | E1
-				n++
+		// Queenside
+		if p.castleRights&wQueensideCastle != 0 {
+			rookSq := p.castlingRookSq[White][1]
+			kingDst := C1
+			rookDst := D1
+			
+			castleOcc := occ &^ (squareBit(kingSq) | squareBit(rookSq))
+			clearMask := BetweenBB[kingSq][kingDst] | BetweenBB[kingSq][rookSq] | squareBit(kingDst) | squareBit(rookDst)
+			checkMask := BetweenBB[kingSq][kingDst] | squareBit(kingDst)
+			
+			if castleOcc&clearMask == 0 {
+				safe := true
+				bb := checkMask
+				for bb != 0 {
+					sq := lsb(bb)
+					if isAttacked(p, sq, Black) {
+						safe = false
+						break
+					}
+					bb &= bb - 1
+				}
+				if safe && !isAttacked(p, kingSq, Black) {
+					list[n] = (CASTLE << 12) | (rookSq << 6) | kingSq
+					n++
+				}
 			}
 		}
 		// Double pawn push: only from rank 2, and rank 3 must be clear too.
@@ -312,18 +353,59 @@ func genQuiet(p *Pos, list []int) int {
 			bb &= bb - 1
 		}
 	} else {
-		// Black kingside: E8->G8.
-		if p.castleRights&bKingsideCastle != 0 && occ&0x6000000000000000 == 0 {
-			if !isAttacked(p, E8, White) && !isAttacked(p, F8, White) {
-				list[n] = (CASTLE << 12) | (G8 << 6) | E8
-				n++
+		kingSq := p.kingSq[Black]
+		// Black kingside
+		if p.castleRights&bKingsideCastle != 0 {
+			rookSq := p.castlingRookSq[Black][0]
+			kingDst := G8
+			rookDst := F8
+			
+			castleOcc := occ &^ (squareBit(kingSq) | squareBit(rookSq))
+			clearMask := BetweenBB[kingSq][kingDst] | BetweenBB[kingSq][rookSq] | squareBit(kingDst) | squareBit(rookDst)
+			checkMask := BetweenBB[kingSq][kingDst] | squareBit(kingDst)
+			
+			if castleOcc&clearMask == 0 {
+				safe := true
+				bb := checkMask
+				for bb != 0 {
+					sq := lsb(bb)
+					if isAttacked(p, sq, White) {
+						safe = false
+						break
+					}
+					bb &= bb - 1
+				}
+				if safe && !isAttacked(p, kingSq, White) {
+					list[n] = (CASTLE << 12) | (rookSq << 6) | kingSq
+					n++
+				}
 			}
 		}
-		// Black queenside: E8->C8.
-		if p.castleRights&bQueensideCastle != 0 && occ&0x0E00000000000000 == 0 {
-			if !isAttacked(p, E8, White) && !isAttacked(p, D8, White) {
-				list[n] = (CASTLE << 12) | (C8 << 6) | E8
-				n++
+		// Black queenside
+		if p.castleRights&bQueensideCastle != 0 {
+			rookSq := p.castlingRookSq[Black][1]
+			kingDst := C8
+			rookDst := D8
+			
+			castleOcc := occ &^ (squareBit(kingSq) | squareBit(rookSq))
+			clearMask := BetweenBB[kingSq][kingDst] | BetweenBB[kingSq][rookSq] | squareBit(kingDst) | squareBit(rookDst)
+			checkMask := BetweenBB[kingSq][kingDst] | squareBit(kingDst)
+			
+			if castleOcc&clearMask == 0 {
+				safe := true
+				bb := checkMask
+				for bb != 0 {
+					sq := lsb(bb)
+					if isAttacked(p, sq, White) {
+						safe = false
+						break
+					}
+					bb &= bb - 1
+				}
+				if safe && !isAttacked(p, kingSq, White) {
+					list[n] = (CASTLE << 12) | (rookSq << 6) | kingSq
+					n++
+				}
 			}
 		}
 		// Double pawn push.

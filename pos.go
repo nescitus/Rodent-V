@@ -50,22 +50,24 @@ import (
 // Every field can be derived from the board array alone, but the
 // redundant fields are maintained incrementally for speed.
 type Pos struct {
-	colorBB      [2]uint64   // colorBB[c]: bitboard of all pieces of color c
-	typeBB       [6]uint64   // typeBB[t]: bitboard of all pieces of type t
-	board        [64]int     // board[sq]: piece on that square, or NO_PC
-	kingSq       [2]int      // kingSq[c]: square of the king of color c
-	count        [2][6]int   // count[c][t] count of pieces of color c and type t
-	side         int         // side to move: White or Black
-	castleRights int         // castling availability: bit0=WK, bit1=WQ, bit2=BK, bit3=BQ
-	epSquare     int         // en-passant target square, or NO_SQ
-	clock        int         // half-move clock for the 50-move rule
-	histLen      int         // number of keys stored in keyHist
-	key          uint64      // Zobrist hash of the current position
-	pawnKey      [2]uint64   // Zobrist hash of pawn position (per side)
-	nonPawnKey   [2]uint64   // Zobrist hash of non-pawn pieces (per side)
-	majorKey     [2]uint64   // Zobrist hash of king and major pieces (per side)
-	minorKey     [2]uint64   // Zobrist hash of king and minor pieces (per side)
-	keyHist      [256]uint64 // hash keys since last irreversible move
+	colorBB        [2]uint64   // colorBB[c]: bitboard of all pieces of color c
+	typeBB         [6]uint64   // typeBB[t]: bitboard of all pieces of type t
+	board          [64]int     // board[sq]: piece on that square, or NO_PC
+	kingSq         [2]int      // kingSq[c]: square of the king of color c
+	count          [2][6]int   // count[c][t] count of pieces of color c and type t
+	side           int         // side to move: White or Black
+	castleRights   int         // castling availability: bit0=WK, bit1=WQ, bit2=BK, bit3=BQ
+	castleMask     [64]int     // dynamic castling mask for the current position
+	castlingRookSq [2][2]int   // castlingRookSq[color][0=kingside, 1=queenside]
+	epSquare       int         // en-passant target square, or NO_SQ
+	clock          int         // half-move clock for the 50-move rule
+	histLen        int         // number of keys stored in keyHist
+	key            uint64      // Zobrist hash of the current position
+	pawnKey        [2]uint64   // Zobrist hash of pawn position (per side)
+	nonPawnKey     [2]uint64   // Zobrist hash of non-pawn pieces (per side)
+	majorKey       [2]uint64   // Zobrist hash of king and major pieces (per side)
+	minorKey       [2]uint64   // Zobrist hash of king and minor pieces (per side)
+	keyHist        [256]uint64 // hash keys since last irreversible move
 }
 
 // ---- Position query helpers ----
@@ -199,27 +201,97 @@ func parseFEN(p *Pos, epd string) {
 	idx += 2 // advance past side char and space
 
 	// --- Castling rights ---
+	p.castlingRookSq[White][0] = NO_SQ
+	p.castlingRookSq[White][1] = NO_SQ
+	p.castlingRookSq[Black][0] = NO_SQ
+	p.castlingRookSq[Black][1] = NO_SQ
+
 	if epd[idx] == '-' {
 		idx++
 	} else {
-		if idx < len(epd) && epd[idx] == 'K' {
-			p.castleRights |= 1
+		for idx < len(epd) && epd[idx] != ' ' {
+			ch := epd[idx]
 			idx++
-		}
-		if idx < len(epd) && epd[idx] == 'Q' {
-			p.castleRights |= 2
-			idx++
-		}
-		if idx < len(epd) && epd[idx] == 'k' {
-			p.castleRights |= 4
-			idx++
-		}
-		if idx < len(epd) && epd[idx] == 'q' {
-			p.castleRights |= 8
-			idx++
+			switch {
+			case ch == 'K':
+				p.castleRights |= 1
+				for f := fileOf(p.kingSq[White]) + 1; f < 8; f++ {
+					sq := makeSquare(f, 0)
+					if p.typeAt(sq) == R && colorOf(p.board[sq]) == White {
+						p.castlingRookSq[White][0] = sq
+						break
+					}
+				}
+			case ch == 'Q':
+				p.castleRights |= 2
+				for f := fileOf(p.kingSq[White]) - 1; f >= 0; f-- {
+					sq := makeSquare(f, 0)
+					if p.typeAt(sq) == R && colorOf(p.board[sq]) == White {
+						p.castlingRookSq[White][1] = sq
+						break
+					}
+				}
+			case ch == 'k':
+				p.castleRights |= 4
+				for f := fileOf(p.kingSq[Black]) + 1; f < 8; f++ {
+					sq := makeSquare(f, 7)
+					if p.typeAt(sq) == R && colorOf(p.board[sq]) == Black {
+						p.castlingRookSq[Black][0] = sq
+						break
+					}
+				}
+			case ch == 'q':
+				p.castleRights |= 8
+				for f := fileOf(p.kingSq[Black]) - 1; f >= 0; f-- {
+					sq := makeSquare(f, 7)
+					if p.typeAt(sq) == R && colorOf(p.board[sq]) == Black {
+						p.castlingRookSq[Black][1] = sq
+						break
+					}
+				}
+			case ch >= 'A' && ch <= 'H':
+				f := int(ch - 'A')
+				if f > fileOf(p.kingSq[White]) {
+					p.castleRights |= 1
+					p.castlingRookSq[White][0] = makeSquare(f, 0)
+				} else {
+					p.castleRights |= 2
+					p.castlingRookSq[White][1] = makeSquare(f, 0)
+				}
+			case ch >= 'a' && ch <= 'h':
+				f := int(ch - 'a')
+				if f > fileOf(p.kingSq[Black]) {
+					p.castleRights |= 4
+					p.castlingRookSq[Black][0] = makeSquare(f, 7)
+				} else {
+					p.castleRights |= 8
+					p.castlingRookSq[Black][1] = makeSquare(f, 7)
+				}
+			}
 		}
 	}
-	idx++ // skip space
+	if idx < len(epd) && epd[idx] == ' ' {
+		idx++ // skip space
+	}
+
+	// --- Initialize dynamic castleMask ---
+	for i := 0; i < 64; i++ {
+		p.castleMask[i] = 15
+	}
+	p.castleMask[p.kingSq[White]] &^= 3
+	p.castleMask[p.kingSq[Black]] &^= 12
+	if sq := p.castlingRookSq[White][0]; sq != NO_SQ {
+		p.castleMask[sq] &^= 1
+	}
+	if sq := p.castlingRookSq[White][1]; sq != NO_SQ {
+		p.castleMask[sq] &^= 2
+	}
+	if sq := p.castlingRookSq[Black][0]; sq != NO_SQ {
+		p.castleMask[sq] &^= 4
+	}
+	if sq := p.castlingRookSq[Black][1]; sq != NO_SQ {
+		p.castleMask[sq] &^= 8
+	}
 
 	// --- En passant square ---
 	// Only record it if a pawn of the side to move can actually

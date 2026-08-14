@@ -33,13 +33,13 @@ func (vb *ViriBuffer) WriteBoard(p *Pos, halfmoveClock int, fullmoveCounter int)
 
 		// Check castling rights for unmoved rooks
 		if typ == R {
-			if sq == H1 && (p.castleRights&1) != 0 {
+			if sq == p.castlingRookSq[White][0] && (p.castleRights&1) != 0 {
 				typ = 6
-			} else if sq == A1 && (p.castleRights&2) != 0 {
+			} else if sq == p.castlingRookSq[White][1] && (p.castleRights&2) != 0 {
 				typ = 6
-			} else if sq == H8 && (p.castleRights&4) != 0 {
+			} else if sq == p.castlingRookSq[Black][0] && (p.castleRights&4) != 0 {
 				typ = 6
-			} else if sq == A8 && (p.castleRights&8) != 0 {
+			} else if sq == p.castlingRookSq[Black][1] && (p.castleRights&8) != 0 {
 				typ = 6
 			}
 		}
@@ -91,15 +91,18 @@ func (vb *ViriBuffer) WriteMoveEval(move int, eval int) {
 		vType = 1
 	} else if mType == CASTLE {
 		vType = 2
-		switch to {
-		case G1:
-			to = H1
-		case C1:
-			to = A1
-		case G8:
-			to = H8
-		case C8:
-			to = A8
+		if fr < 32 { // White
+			if to > fr {
+				to = G1
+			} else {
+				to = C1
+			}
+		} else { // Black
+			if to > fr {
+				to = G8
+			} else {
+				to = C8
+			}
 		}
 	} else if mType >= N_PROM {
 		vType = 3

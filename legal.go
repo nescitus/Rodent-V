@@ -47,9 +47,11 @@ func isLegal(p *Pos, move int) bool {
 	if fromType == NO_TP || colorOf(p.board[from]) != side {
 		return false
 	}
-	// The to-square must be empty or hold an enemy piece.
-	if toType != NO_TP && colorOf(p.board[to]) == side {
-		return false
+	// The to-square must be empty or hold an enemy piece (unless castling in FRC, where king takes friendly rook).
+	if moveType(move) != CASTLE {
+		if toType != NO_TP && colorOf(p.board[to]) == side {
+			return false
+		}
 	}
 
 	switch moveType(move) {
@@ -57,33 +59,58 @@ func isLegal(p *Pos, move int) bool {
 		// Fall through to piece-specific checks below.
 
 	case CASTLE:
-		// King must start on its home square.
-		if side == White {
-			if from != E1 {
-				return false
-			}
-			if to > from { // kingside
-				return p.castleRights&wKingsideCastle != 0 &&
-					p.occupied()&0x0000000000000060 == 0 &&
-					!isAttacked(p, E1, Black) && !isAttacked(p, F1, Black)
-			}
-			// queenside
-			return p.castleRights&wQueensideCastle != 0 &&
-				p.occupied()&0x000000000000000E == 0 &&
-				!isAttacked(p, E1, Black) && !isAttacked(p, D1, Black)
-		}
-		if from != E8 {
+		// In FRC, from is kingSq and to is rookSq.
+		if from != p.kingSq[side] {
 			return false
 		}
-		if to > from { // kingside
-			return p.castleRights&bKingsideCastle != 0 &&
-				p.occupied()&0x6000000000000000 == 0 &&
-				!isAttacked(p, E8, White) && !isAttacked(p, F8, White)
+		
+		var kingDst, rookDst int
+		var isKingside bool
+		
+		if side == White {
+			isKingside = (to == p.castlingRookSq[White][0])
+			if isKingside {
+				if p.castleRights&wKingsideCastle == 0 { return false }
+				kingDst = G1
+				rookDst = F1
+			} else if to == p.castlingRookSq[White][1] {
+				if p.castleRights&wQueensideCastle == 0 { return false }
+				kingDst = C1
+				rookDst = D1
+			} else {
+				return false
+			}
+		} else {
+			isKingside = (to == p.castlingRookSq[Black][0])
+			if isKingside {
+				if p.castleRights&bKingsideCastle == 0 { return false }
+				kingDst = G8
+				rookDst = F8
+			} else if to == p.castlingRookSq[Black][1] {
+				if p.castleRights&bQueensideCastle == 0 { return false }
+				kingDst = C8
+				rookDst = D8
+			} else {
+				return false
+			}
 		}
-		// queenside
-		return p.castleRights&bQueensideCastle != 0 &&
-			p.occupied()&0x0E00000000000000 == 0 &&
-			!isAttacked(p, E8, White) && !isAttacked(p, D8, White)
+		
+		castleOcc := p.occupied() &^ (squareBit(from) | squareBit(to))
+		clearMask := BetweenBB[from][kingDst] | BetweenBB[from][to] | squareBit(kingDst) | squareBit(rookDst)
+		if castleOcc&clearMask != 0 {
+			return false
+		}
+		
+		checkMask := BetweenBB[from][kingDst] | squareBit(kingDst) | squareBit(from)
+		bb := checkMask
+		for bb != 0 {
+			sq := lsb(bb)
+			if isAttacked(p, sq, opp(side)) {
+				return false
+			}
+			bb &= bb - 1
+		}
+		return true
 
 	case EP_CAP:
 		return fromType == P && to == p.epSquare

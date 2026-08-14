@@ -72,6 +72,10 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 	p.keyHist[p.histLen] = p.key
 	p.histLen++
 
+	if moveType(move) == CASTLE {
+		u.captType = NO_TP // FRC Castling is not a capture, even if it lands on a friendly rook
+	}
+
 	// 50-move clock: resets on pawn moves and captures.
 	if u.movingType == P || u.captType != NO_TP {
 		p.clock = 0
@@ -79,10 +83,9 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 		p.clock++
 	}
 
-	// Update castling rights: strip any rights affected by a piece
-	// moving from or being captured on a corner/king square.
+	// Update castling rights using dynamic castleMask.
 	p.key ^= zobCastle[p.castleRights]
-	p.castleRights &= castleMask[u.from] & castleMask[u.to]
+	p.castleRights &= p.castleMask[u.from] & p.castleMask[u.to]
 	p.key ^= zobCastle[p.castleRights]
 
 	// Clear old en-passant key contribution.
@@ -92,37 +95,39 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 	}
 
 	// --- Move the piece from -> to ---
-	p.board[u.from] = NO_PC
-	p.board[u.to] = makePiece(side, u.movingType)
-
-	hashDelta := zobPiece[makePiece(side, u.movingType)][u.from] ^
-		zobPiece[makePiece(side, u.movingType)][u.to]
-
-	p.key ^= hashDelta
-	if u.movingType == P {
-		p.pawnKey[side] ^= hashDelta
-	} else {
-		p.nonPawnKey[side] ^= hashDelta
-		if u.movingType == N || u.movingType == B || u.movingType == K {
-			p.minorKey[side] ^= hashDelta
+	if moveType(move) != CASTLE {
+		p.board[u.from] = NO_PC
+		p.board[u.to] = makePiece(side, u.movingType)
+	
+		hashDelta := zobPiece[makePiece(side, u.movingType)][u.from] ^
+			zobPiece[makePiece(side, u.movingType)][u.to]
+	
+		p.key ^= hashDelta
+		if u.movingType == P {
+			p.pawnKey[side] ^= hashDelta
+		} else {
+			p.nonPawnKey[side] ^= hashDelta
+			if u.movingType == N || u.movingType == B || u.movingType == K {
+				p.minorKey[side] ^= hashDelta
+			}
+			if u.movingType == R || u.movingType == Q || u.movingType == K {
+				p.majorKey[side] ^= hashDelta
+			}
 		}
-		if u.movingType == R || u.movingType == Q || u.movingType == K {
-			p.majorKey[side] ^= hashDelta
+	
+		p.colorBB[side] ^= squareBit(u.from) | squareBit(u.to)
+		p.typeBB[u.movingType] ^= squareBit(u.from) | squareBit(u.to)
+	
+		// --- Update king square ---
+		if u.movingType == K {
+			p.kingSq[side] = u.to
 		}
-	}
-
-	p.colorBB[side] ^= squareBit(u.from) | squareBit(u.to)
-	p.typeBB[u.movingType] ^= squareBit(u.from) | squareBit(u.to)
-
-	// --- Update king square ---
-	if u.movingType == K {
-		p.kingSq[side] = u.to
 	}
 
 	// --- Handle a normal capture at "to" ---
 	if u.captType != NO_TP {
 		u.capSq = u.to
-		hashDelta = zobPiece[makePiece(enemy, u.captType)][u.to]
+		hashDelta := zobPiece[makePiece(enemy, u.captType)][u.to]
 		p.key ^= hashDelta
 		if u.captType == P {
 			p.pawnKey[enemy] ^= hashDelta
@@ -151,27 +156,59 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 		// Nothing extra to do.
 
 	case CASTLE:
-		// Move the rook atomically with the king.
-		// King side: rook goes from +3 to +(-1) relative to king.
-		// Queen side: rook goes from -4 to +(+1) relative to king.
+		// In FRC, from is king (e.g. E1) and to is rook (e.g. H1).
+		// We must move King to kingDst and Rook to rookDst.
+		// We remove both first, then place both, to handle overlapping sqs.
 		u.flag = uCASTLE
-		if u.to > u.from {
-			u.rookFrom = u.from + 3 // H-file rook
-			u.rookTo = u.to - 1     // F-file landing
+		
+		var kingDst, rookDst int
+		if side == White {
+			if u.to == p.castlingRookSq[White][0] { kingDst, rookDst = G1, F1 } else { kingDst, rookDst = C1, D1 }
 		} else {
-			u.rookFrom = u.from - 4 // A-file rook
-			u.rookTo = u.to + 1     // D-file landing
+			if u.to == p.castlingRookSq[Black][0] { kingDst, rookDst = G8, F8 } else { kingDst, rookDst = C8, D8 }
 		}
-
+		u.rookFrom = u.to
+		u.rookTo = rookDst
+		u.to = kingDst
+		
+		// 1. Remove King
+		p.board[u.from] = NO_PC
+		p.colorBB[side] ^= squareBit(u.from)
+		p.typeBB[K] ^= squareBit(u.from)
+		hashDeltaKFrom := zobPiece[makePiece(side, K)][u.from]
+		p.key ^= hashDeltaKFrom
+		p.nonPawnKey[side] ^= hashDeltaKFrom
+		p.minorKey[side] ^= hashDeltaKFrom
+		p.majorKey[side] ^= hashDeltaKFrom
+		
+		// 2. Remove Rook
 		p.board[u.rookFrom] = NO_PC
+		p.colorBB[side] ^= squareBit(u.rookFrom)
+		p.typeBB[R] ^= squareBit(u.rookFrom)
+		hashDeltaRFrom := zobPiece[makePiece(side, R)][u.rookFrom]
+		p.key ^= hashDeltaRFrom
+		p.nonPawnKey[side] ^= hashDeltaRFrom
+		p.majorKey[side] ^= hashDeltaRFrom
+		
+		// 3. Place King
+		p.board[kingDst] = makePiece(side, K)
+		p.colorBB[side] ^= squareBit(kingDst)
+		p.typeBB[K] ^= squareBit(kingDst)
+		hashDeltaKTo := zobPiece[makePiece(side, K)][kingDst]
+		p.key ^= hashDeltaKTo
+		p.nonPawnKey[side] ^= hashDeltaKTo
+		p.minorKey[side] ^= hashDeltaKTo
+		p.majorKey[side] ^= hashDeltaKTo
+		p.kingSq[side] = kingDst
+		
+		// 4. Place Rook
 		p.board[u.rookTo] = makePiece(side, R)
-		hashDelta = zobPiece[makePiece(side, R)][u.rookFrom] ^
-			zobPiece[makePiece(side, R)][u.rookTo]
-		p.key ^= hashDelta
-		p.nonPawnKey[side] ^= hashDelta
-		p.majorKey[side] ^= hashDelta
-		p.colorBB[side] ^= squareBit(u.rookFrom) | squareBit(u.rookTo)
-		p.typeBB[R] ^= squareBit(u.rookFrom) | squareBit(u.rookTo)
+		p.colorBB[side] ^= squareBit(u.rookTo)
+		p.typeBB[R] ^= squareBit(u.rookTo)
+		hashDeltaRTo := zobPiece[makePiece(side, R)][u.rookTo]
+		p.key ^= hashDeltaRTo
+		p.nonPawnKey[side] ^= hashDeltaRTo
+		p.majorKey[side] ^= hashDeltaRTo
 
 	case EP_CAP:
 		// The captured pawn sits one square behind "to" (XOR 8 flips rank).
@@ -243,60 +280,69 @@ func unmakeMove(p *Pos, u *Update, r *Revert) {
 		pieceOnTo = u.prom
 	}
 
-	// --- Undo castling rook move first ---
-	if u.flag == CASTLE {
-		rookFromBB := squareBit(u.rookFrom)
-		rookToBB := squareBit(u.rookTo)
-
-		p.board[u.rookTo] = NO_PC
-		p.board[u.rookFrom] = makePiece(side, R)
-
-		p.colorBB[side] ^= rookFromBB | rookToBB
-		p.typeBB[R] ^= rookFromBB | rookToBB
-	}
-
-	// --- Remove moved piece from "to", restore original piece on "from" ---
-	p.board[from] = makePiece(side, u.movingType)
-
-	p.colorBB[side] ^= fromBB | toBB
-
-	if pieceOnTo == u.movingType {
-		p.typeBB[u.movingType] ^= fromBB | toBB
-	} else {
-		// Promotion: remove promoted piece from "to" and restore pawn on "from".
-		p.typeBB[pieceOnTo] ^= toBB
-		p.typeBB[u.movingType] ^= fromBB
-
-		p.count[side][pieceOnTo]--
-		p.count[side][P]++
-	}
-
-	if u.movingType == K {
+	if u.flag == uCASTLE {
+		kingDst := u.to
+		
+		p.board[kingDst] = NO_PC
+		p.colorBB[side] ^= squareBit(kingDst)
+		p.typeBB[K] ^= squareBit(kingDst)
 		p.kingSq[side] = from
-	}
-
-	// --- Restore destination/captured piece ---
-	switch u.flag {
-	case EP_CAP:
-		// Destination was empty before the move.
+		
+		p.board[u.rookTo] = NO_PC
+		p.colorBB[side] ^= squareBit(u.rookTo)
+		p.typeBB[R] ^= squareBit(u.rookTo)
+		
+		p.board[from] = makePiece(side, K)
+		p.colorBB[side] ^= squareBit(from)
+		p.typeBB[K] ^= squareBit(from)
+		
+		p.board[u.rookFrom] = makePiece(side, R)
+		p.colorBB[side] ^= squareBit(u.rookFrom)
+		p.typeBB[R] ^= squareBit(u.rookFrom)
+	} else {
 		p.board[to] = NO_PC
-
-		capSq := u.capSq
-		capBB := squareBit(capSq)
-
-		p.board[capSq] = makePiece(enemy, P)
-		p.colorBB[enemy] ^= capBB
-		p.typeBB[P] ^= capBB
-		p.count[enemy][P]++
-
-	default:
-		if u.captType != NO_TP {
-			p.board[to] = makePiece(enemy, u.captType)
-			p.colorBB[enemy] ^= toBB
-			p.typeBB[u.captType] ^= toBB
-			p.count[enemy][u.captType]++
+		p.board[from] = makePiece(side, u.movingType)
+	
+		p.colorBB[side] ^= fromBB | toBB
+	
+		if pieceOnTo == u.movingType {
+			p.typeBB[u.movingType] ^= fromBB | toBB
 		} else {
+			// Promotion: remove promoted piece from "to" and restore pawn on "from".
+			p.typeBB[pieceOnTo] ^= toBB
+			p.typeBB[u.movingType] ^= fromBB
+	
+			p.count[side][pieceOnTo]--
+			p.count[side][P]++
+		}
+	
+		if u.movingType == K {
+			p.kingSq[side] = from
+		}
+	
+		// --- Restore destination/captured piece ---
+		switch u.flag {
+		case uEP_CAP:
+			// Destination was empty before the move.
 			p.board[to] = NO_PC
+	
+			capSq := u.capSq
+			capBB := squareBit(capSq)
+	
+			p.board[capSq] = makePiece(enemy, P)
+			p.colorBB[enemy] ^= capBB
+			p.typeBB[P] ^= capBB
+			p.count[enemy][P]++
+	
+		default:
+			if u.captType != NO_TP {
+				p.board[to] = makePiece(enemy, u.captType)
+				p.colorBB[enemy] ^= toBB
+				p.typeBB[u.captType] ^= toBB
+				p.count[enemy][u.captType]++
+			} else {
+				p.board[to] = NO_PC
+			}
 		}
 	}
 
