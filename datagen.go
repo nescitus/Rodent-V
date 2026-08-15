@@ -197,30 +197,36 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 		if p.side == Black {
 			whiteScore = -score
 		}
-		vb.WriteMoveEval(bestMove, whiteScore)
-		numEntries++
 
 		absScore := score
 		if absScore < 0 {
 			absScore = -absScore
 		}
 
+		// Initial position verification filter (skip blundered/unbalanced random openings)
+		if ply == 0 && absScore > 400 {
+			return ViriBuffer{}, 0, false
+		}
+
+		vb.WriteMoveEval(bestMove, whiteScore)
+		numEntries++
+
 		if absScore < 30000 {
-			// Draw adjudication: if score remains within [-15, 15] cp for 8 half-moves after ply 30
-			if absScore <= 15 {
+			// Draw adjudication: if score remains within [-30, 30] cp for 8 half-moves after ply 40
+			if absScore <= 30 {
 				drawCount++
 			} else {
 				drawCount = 0
 			}
-			if drawCount >= 8 && ply >= 30 {
+			if drawCount >= 8 && ply >= 40 {
 				result = 0.5
 				break
 			}
 
-			// Resignation / overwhelming lead adjudication (|score| >= 1000 cp for 3 half-moves)
-			if absScore >= 1000 {
+			// Resignation / overwhelming lead adjudication (|score| >= 650 cp for 5 half-moves)
+			if absScore >= 650 {
 				resignCount++
-				if resignCount >= 3 {
+				if resignCount >= 5 {
 					if score > 0 {
 						if p.side == White {
 							result = 1.0
