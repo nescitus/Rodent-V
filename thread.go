@@ -185,16 +185,6 @@ func (ss *SearchState) resetForSearch(p *Pos) bool {
 
 	ss.isUsingNNUE = nnue.Loaded && singleOptionValue[NnuePerc] > 0
 
-	// ss.finny is intentionally NOT reset here. Each entry self-validates
-	// against the current board via its pieces[12] bitboard snapshot and
-	// applies an exact add/sub diff regardless of how stale it is, so a
-	// warm-but-unrelated cache still produces a bit-identical accumulator
-	// -- just with more add/sub calls than a small in-game diff would
-	// need. Keeping it warm across resetForSearch calls (once per move in
-	// datagen, once per think() in UCI) turns most refreshes into a small
-	// diff instead of a full rebuild. See clearHistory for the one place
-	// it's still cleared (ucinewgame).
-
 	// KBN vs K: switch to pure HCE so checkmateHelper's corner-driving
 	// tables are used instead of NNUE, which has no understanding of the
 	// correct mating corner. Hash invalidation belongs to the table owner:

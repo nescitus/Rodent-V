@@ -10,30 +10,27 @@ import (
 	"time"
 )
 
+type dgEntry struct {
+	fen   string
+	eval  int // White perspective
+	score float64
+}
+
 var datagenMode bool = false
 
-// bookIndex holds an opening-book file as one raw byte buffer plus a flat
-// table of per-line [start,end) offsets, instead of one string per line.
-// The reference UHO book is 2.6M lines; holding that as []string would
-// leave 2.6M separate pointers for the GC to rescan on every cycle for the
-// life of the run. offsets has no pointers at all, so only two allocations
-// (data and offsets) are ever live regardless of book size.
+// bookIndex holds the raw book file in a single contiguous byte buffer
+// and an index of [start, end] byte offsets for each non-empty trimmed line.
+// This avoids allocating millions of individual string objects (and their
+// GC metadata) on large opening books.
 type bookIndex struct {
 	data    []byte
-	offsets []uint32 // pairs: offsets[2*i], offsets[2*i+1] = start, end of line i
+	offsets []uint32 // [start0, end0, start1, end1, ...]
 }
 
 func isASCIISpace(b byte) bool {
-	switch b {
-	case ' ', '\t', '\n', '\r', '\v', '\f':
-		return true
-	}
-	return false
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
 }
 
-// indexBookLines finds the trimmed [start,end) byte range of every
-// non-blank line in data, matching bufio.Scanner + strings.TrimSpace +
-// skip-empty semantics without allocating a string per line.
 func indexBookLines(data []byte) []uint32 {
 	offsets := make([]uint32, 0, 2*(len(data)/64+1))
 	lineStart := 0
@@ -79,12 +76,8 @@ func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 	fmt.Printf("Starting datagen: %d target positions, %d threads, %d nodes/move\n", targetPositions, threads, nodesPerMove)
 	datagenMode = true
 
-	// datagen is a batch process, not the UCI engine: the soft memory limit
-	// in updateMemoryLimit is sized for one global hash table and badly
-	// undercounts N private per-thread tables plus a multi-hundred-MB
-	// opening book, which previously drove the GC into near-continuous
-	// collection. A batch run doesn't need a memory ceiling, so disable it
-	// and let the default pacer manage the (now much smaller) live set.
+	// datagen is a batch process, not the UCI engine: disable the soft memory limit
+	// so the GC isn't driven into continuous collection loops across millions of positions.
 	disableMemoryLimit()
 
 	var book *bookIndex
@@ -94,7 +87,7 @@ func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 			fmt.Printf("Warning: could not open book file %s, using startpos\n", bookFile)
 		} else {
 			book = b
-			fmt.Printf("Loaded %d positions from book %s\n", book.numLines(), bookFile)
+			fmt.Printf("Loaded %d positions from book %s (compact buffer)\n", book.numLines(), bookFile)
 		}
 	}
 
@@ -147,14 +140,8 @@ func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 			ss.tt = new(TTable)
 			ss.tt.alloc(1)
 			ss.isUsingNNUE = nnue.Loaded && singleOptionValue[NnuePerc] > 0
-			// Private eval/pawn hash tables, same sizing as the shared
-			// global ones (eval.go's init), so 16 threads don't race on
-			// the same 24-byte entries -- see evalHash/pawnHash on
-			// SearchState.
-			ss.evalHash = newEvalHashTable(128 * 128)
-			ss.pawnHash = newPawnHashTable(64 * 128)
 
-			var vb ViriBuffer // reused across games; Reset() keeps its backing array
+			var vb ViriBuffer // Reused across games to eliminate per-game heap allocations
 
 			for {
 				if atomic.LoadInt64(&totalPositions) >= int64(targetPositions) {
@@ -183,7 +170,7 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, vb *ViriBuffer, nodesPerMove in
 	var p Pos
 
 	numRandom := 0
-	if book.numLines() > 0 {
+	if book != nil && book.numLines() > 0 {
 		fen := book.line(rng.Intn(book.numLines()))
 		parseFEN(&p, fen)
 		numRandom = rng.Intn(10) // 0 to 9 random moves from book pos
@@ -224,12 +211,9 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, vb *ViriBuffer, nodesPerMove in
 		}
 	}
 
-	// New game: age out the previous game's TT entries so replacement
-	// isn't purely depth-preferent (see runDatagenSearch for the per-move
-	// aging that keeps this working within a game).
+	// New game: clear TT entries and reset Finny cache
 	ss.tt.clear()
-
-	// Make sure NNUE is ready
+	ss.finny = [2][2]FinnyEntry{}
 	refresh(&p, &ss.accStack[0])
 
 	vb.Reset()
@@ -264,30 +248,36 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, vb *ViriBuffer, nodesPerMove in
 		if p.side == Black {
 			whiteScore = -score
 		}
-		vb.WriteMoveEval(bestMove, whiteScore)
-		numEntries++
 
 		absScore := score
 		if absScore < 0 {
 			absScore = -absScore
 		}
 
+		// Initial position verification filter (skip blundered/unbalanced random openings)
+		if ply == 0 && absScore > 400 {
+			return 0, false
+		}
+
+		vb.WriteMoveEval(bestMove, whiteScore)
+		numEntries++
+
 		if absScore < 30000 {
-			// Draw adjudication
-			if absScore <= 10 {
+			// Draw adjudication: if score remains within [-30, 30] cp for 8 half-moves after ply 40
+			if absScore <= 30 {
 				drawCount++
 			} else {
 				drawCount = 0
 			}
-			if drawCount >= 10 && ply >= 40 {
+			if drawCount >= 8 && ply >= 40 {
 				result = 0.5
 				break
 			}
 
-			// Resignation / overwhelming lead adjudication
-			if absScore > 1500 {
+			// Resignation / overwhelming lead adjudication (|score| >= 650 cp for 5 half-moves)
+			if absScore >= 650 {
 				resignCount++
-				if resignCount >= 3 {
+				if resignCount >= 5 {
 					if score > 0 {
 						if p.side == White {
 							result = 1.0
@@ -315,7 +305,7 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, vb *ViriBuffer, nodesPerMove in
 			p.histLen = 0
 		}
 		if ss.isUsingNNUE {
-			ss.accStack[0].applyPendingChanges(&ss.accStack[0], &p, &u, ss)
+			ss.accStack[0].applyPendingChanges(&p, &u, ss)
 		}
 	}
 
@@ -349,21 +339,9 @@ func isRepetitionDG(p *Pos) bool {
 }
 
 func runDatagenSearch(p *Pos, ss *SearchState, softNodesLimit int) (int, int) {
-	// Age the TT for this move. datagen never calls think(), which is the
-	// only other caller of newDate(); without this, t.date stays 0 for the
-	// whole run and the replacement policy degenerates to pure
-	// depth-preference, never evicting stale entries from earlier moves.
 	ss.tt.newDate()
-	if ss.resetForSearch(p) {
-		ss.clearSearchHashes()
-	}
-
-	// Capped soft limit: cap search at 1.5x - 2x soft limit to prevent pathological node explosions
-	hardLimit := int64(softNodesLimit) * 3 / 2
-	if hardLimit < 7500 {
-		hardLimit = 7500
-	}
-	ss.nodesLimit = hardLimit
+	ss.resetForSearch(p)
+	ss.nodesLimit = int64(softNodesLimit)
 
 	var pv [maxPly]int
 	score := 0
