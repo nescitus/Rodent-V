@@ -124,16 +124,18 @@ var tunerDisableMobility bool
 // evaluate returns the static score for the current position from the
 // perspective of the side to move.  Positive = better for the mover.
 // Before calculating eval score, it tries to find it in the eval hashtable.
-func evaluate(p *Pos, acc *Accumulator) int {
+// ss selects which eval/pawn hash table to use (evalHashFor/pawnHashFor);
+// pass nil to use the shared global tables.
+func evaluate(p *Pos, acc *Accumulator, ss *SearchState) int {
 
-	if score, ok := probeEvalHash(p.key); ok {
+	if score, ok := evalHashFor(ss).probe(p.key); ok {
 		return score
 	}
 
 	score := 0
 
 	if !nnue.Loaded {
-		score = eval_internal(p, false)
+		score = eval_internal(p, false, ss)
 	} else {
 		nnueScore := 0
 		hceScore := 0
@@ -141,7 +143,7 @@ func evaluate(p *Pos, acc *Accumulator) int {
 			nnueScore = evaluateScaledNNUE(p, acc)
 		}
 		if singleOptionValue[HcePerc] > 0 {
-			hceScore = eval_internal(p, false) * singleOptionValue[HcePerc] / 100
+			hceScore = eval_internal(p, false, ss) * singleOptionValue[HcePerc] / 100
 		}
 
 		score = hceScore + nnueScore
@@ -158,27 +160,27 @@ func evaluate(p *Pos, acc *Accumulator) int {
 		}
 	}
 
-	storeEvalHash(p.key, score)
+	evalHashFor(ss).store(p.key, score)
 	return score
 }
 
 // evaluateHCE is 100% handcrafted eval, sped up by eval transposition table
-func evaluateHCE(p *Pos) int {
-	if score, ok := probeEvalHash(p.key); ok {
+func evaluateHCE(p *Pos, ss *SearchState) int {
+	if score, ok := evalHashFor(ss).probe(p.key); ok {
 		return score
 	}
-	score := eval_internal(p, false)
-	storeEvalHash(p.key, score)
+	score := eval_internal(p, false, ss)
+	evalHashFor(ss).store(p.key, score)
 	return score
 }
 
 // evaluateNNUE is weighted NNUE eval, sped up by eval transposition table
-func evaluateNNUE(p *Pos, acc *Accumulator) int {
-	if score, ok := probeEvalHash(p.key); ok {
+func evaluateNNUE(p *Pos, acc *Accumulator, ss *SearchState) int {
+	if score, ok := evalHashFor(ss).probe(p.key); ok {
 		return score
 	}
 	score := evaluateScaledNNUE(p, acc)
-	storeEvalHash(p.key, score)
+	evalHashFor(ss).store(p.key, score)
 	return score
 }
 
@@ -201,12 +203,14 @@ func evaluateScaledNNUE(p *Pos, acc *Accumulator) int {
 
 // eval_trace describes engine's hce evaluation
 func eval_trace(p *Pos) int {
-	return eval_internal(p, true)
+	return eval_internal(p, true, nil)
 }
 
 // eval_internal returns the static score for the current position from the
 // perspective of the side to move.  Positive = better for the mover.
-func eval_internal(p *Pos, shouldReport bool) int {
+// ss selects the pawn hash table (pawnHashFor); pass nil for the shared
+// global table (the tuner, which has no SearchState, always does).
+func eval_internal(p *Pos, shouldReport bool, ss *SearchState) int {
 	var e EvalData // Golang-specific: it will be initialized as all zeroes
 
 	// Tempo. Having the right to move is beneficial. Unfortunately
@@ -228,7 +232,7 @@ func eval_internal(p *Pos, shouldReport bool) int {
 	e.kingRing[White] = kingAtk[p.kingSq[White]]
 	e.kingRing[Black] = kingAtk[p.kingSq[Black]]
 
-	evaluatePawnStructure(p, &e)
+	evaluatePawnStructure(p, &e, ss)
 
 	evaluatePieces(p, &e, White)
 	evaluatePieces(p, &e, Black)
@@ -441,11 +445,12 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 }
 
 // evaluate pawn structure or read the score from the pawn hashtable
-func evaluatePawnStructure(p *Pos, e *EvalData) {
+func evaluatePawnStructure(p *Pos, e *EvalData, ss *SearchState) {
 
 	var key = getPawnKey(p)
+	pawnHash := pawnHashFor(ss)
 
-	if wscoreMG, bscoreMG, wscoreEG, bscoreEG, wCenter, bCenter, ok := probePawnHash(key); ok {
+	if wscoreMG, bscoreMG, wscoreEG, bscoreEG, wCenter, bCenter, ok := pawnHash.probe(key); ok {
 		add(e, White, EvalPawns, wscoreMG, wscoreEG)
 		add(e, Black, EvalPawns, bscoreMG, bscoreEG)
 		e.center[White] = CenterType(wCenter)
@@ -455,7 +460,7 @@ func evaluatePawnStructure(p *Pos, e *EvalData) {
 		initCenterType(p, e)
 		evaluatePawns(p, e, White)
 		evaluatePawns(p, e, Black)
-		storePawnHash(key, e.mgScore[White][EvalPawns], e.mgScore[Black][EvalPawns],
+		pawnHash.store(key, e.mgScore[White][EvalPawns], e.mgScore[Black][EvalPawns],
 			e.egScore[White][EvalPawns], e.egScore[Black][EvalPawns], int(e.center[White]), int(e.center[Black]))
 	}
 }

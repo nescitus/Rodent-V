@@ -171,7 +171,11 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 	atomic.StoreInt32(&abortFlag, 0)
 	ss := states[0]
 	ss.tt.newDate()
-	ss.resetForSearch(p)
+	if ss.resetForSearch(p) {
+		// The main state owns evaluation-regime transitions for the shared
+		// UCI hashes. Clear them before any lazy-SMP helper can start.
+		ss.clearSearchHashes()
+	}
 	refresh(p, &ss.accStack[0])
 
 	// Emit info about node limit
@@ -737,8 +741,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			// We are about to recurse. Prepare NNUE accumulator for the next ply
 			// and update it, since we know a move is legal.
 			if ss.isUsingNNUE {
-				childAcc := ss.prepareChildAccumulator(ply)
-				childAcc.applyPendingChanges(p, u, ss)
+				childAcc := ss.nextPlyAccumulator(ply)
+				childAcc.applyPendingChanges(&ss.accStack[ply], p, u, ss)
 			}
 
 			score = -ss.quiesce(p, ply+1, -probcutBeta, -probcutBeta+1, probcutPv[:])
@@ -812,7 +816,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// Does the move give check?
 		givesCheck := moveGivesCheck(p, move)
 
-				// Late move pruning: skip quiet moves beyond the threshold.
+		// Late move pruning: skip quiet moves beyond the threshold.
 		// Moves that give check are exempt — they may be the only defence
 		// or the only way to continue a mating attack.
 		// When improving we allow more moves (position is trending up, so
@@ -945,8 +949,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// that move is legal and hasn't been pruned.
 
 		if ss.isUsingNNUE {
-			childAcc := ss.prepareChildAccumulator(ply)
-			childAcc.applyPendingChanges(p, u, ss)
+			childAcc := ss.nextPlyAccumulator(ply)
+			childAcc.applyPendingChanges(&ss.accStack[ply], p, u, ss)
 		}
 
 		// Count quiet moves
@@ -1303,8 +1307,8 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		// We are about to recurse. Prepare NNUE accumulator
 		// for the next ply and update it since we know move is legal
 		if ss.isUsingNNUE {
-			childAcc := ss.prepareChildAccumulator(ply)
-			childAcc.applyPendingChanges(p, u, ss)
+			childAcc := ss.nextPlyAccumulator(ply)
+			childAcc.applyPendingChanges(&ss.accStack[ply], p, u, ss)
 		}
 
 		score := -ss.quiesce(p, ply+1, -beta, -alpha, childPv[:])

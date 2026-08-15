@@ -28,6 +28,7 @@ import (
 	_ "embed"
 	"math/bits"
 	"os"
+	"unsafe"
 
 	"golang.org/x/sys/cpu"
 )
@@ -101,116 +102,231 @@ type Update struct {
 // The accumulator itself now belongs to searchState.
 // This state contains only information shared by the engine.
 type NNUEState struct {
-	Loaded bool
+	Loaded     bool
+	generation uint64
 }
 
-// Interface to cater for assembly code for various net sizes.
+// Dispatch to assembly code for various net sizes lives in the nnueX
+// wrapper functions below (nnueAddSingle, nnueMove, nnueEval, ...).
+// hasAVX2 is resolved once at startup; every nnueX wrapper branches on
+// it directly instead of going through a package-level func variable.
+//
+// The previous design stored the chosen kernel in six func-var globals
+// (addSingleFunction, moveFunction, evalFunction, ...) selected once in
+// init(). That makes every accumulator update and every evaluation an
+// indirect call, which defeats escape analysis: the compiler cannot see
+// through a call to an unknown function value to confirm the callee's
+// //go:noescape pragma applies, so e.g. `sum` in (*Accumulator).getEval
+// was heap-allocated on every single evaluation. Calling concrete
+// functions here (through a compile-time constant switch on
+// NNUEHiddenSize, so only one case per operation is ever live) lets the
+// compiler verify none of the pointer arguments escape, at zero cost to
+// the existing multi-size flexibility.
+var hasAVX2 bool
 
-type addSingleFunc func(
-	a, w *int16,
-)
-
-type subSingleFunc func(
-	a, w *int16,
-)
-
-type captureFunc func(
-	a0, a1 *int16,
-	wTo0, wFrom0, wCap0 *int16,
-	wTo1, wFrom1, wCap1 *int16,
-)
-
-type moveFunc func(
-	a0, a1 *int16,
-	wFrom0, wTo0 *int16,
-	wFrom1, wTo1 *int16,
-)
-
-type castleFunc func(
-	a0, a1 *int16,
-	wKFrom0, wKTo0, wRFrom0, wRTo0 *int16,
-	wKFrom1, wKTo1, wRFrom1, wRTo1 *int16,
-)
-
-type evalFunc func(
-	a0, a1 *int16,
-	w0, w1 *int16,
-	sum *int32,
-)
-
-var addSingleFunction addSingleFunc
-var subSingleFunction subSingleFunc
-var captureFunction captureFunc
-var moveFunction moveFunc
-var castleFunction castleFunc
-var evalFunction evalFunc
-
-// init picks the correct assembly routines for the configured NNUE size.
 func init() {
-	// Safe fallback.
-	addSingleFunction = addSingleScalar
-	subSingleFunction = subSingleScalar
-	moveFunction = moveScalar
-	captureFunction = captureScalar
-	castleFunction = castleScalar
-	evalFunction = evalScalar
+	hasAVX2 = cpu.X86.HasAVX2
+}
 
-	if !cpu.X86.HasAVX2 {
+func nnueAddSingle(a, w *int16) {
+	if !hasAVX2 {
+		addSingleScalar(a, w)
 		return
 	}
-
 	switch NNUEHiddenSize {
 	case 64:
-		moveFunction = moveAVX2_64
-		captureFunction = captureAVX2_64
-		castleFunction = castleAVX2_64
-		evalFunction = getEvalAVX2_64
-		addSingleFunction = addSingleAVX2_64
-		subSingleFunction = subSingleAVX2_64
-
+		addSingleAVX2_64(a, w)
 	case 128:
-		moveFunction = moveAVX2_128
-		captureFunction = captureAVX2_128
-		castleFunction = castleAVX2_128
-		evalFunction = getEvalAVX2_128
-		addSingleFunction = addSingleAVX2_128
-		subSingleFunction = subSingleAVX2_128
-
+		addSingleAVX2_128(a, w)
 	case 256:
-		moveFunction = moveAVX2_256
-		captureFunction = captureAVX2_256
-		castleFunction = castleAVX2_256
-		evalFunction = getEvalAVX2_256
-		addSingleFunction = addSingleAVX2_256
-		subSingleFunction = subSingleAVX2_256
-
+		addSingleAVX2_256(a, w)
 	case 384:
-		moveFunction = moveAVX2_384
-		captureFunction = captureAVX2_384
-		castleFunction = castleAVX2_384
-		evalFunction = getEvalAVX2_384
-		addSingleFunction = addSingleAVX2_384
-		subSingleFunction = subSingleAVX2_384
-
+		addSingleAVX2_384(a, w)
 	case 512:
-		moveFunction = moveAVX2_512
-		captureFunction = captureAVX2_512
-		castleFunction = castleAVX2_512
-		evalFunction = getEvalAVX2_512
-		addSingleFunction = addSingleAVX2_512
-		subSingleFunction = subSingleAVX2_512
-
+		addSingleAVX2_512(a, w)
 	case 768:
-		moveFunction = moveAVX2_768
-		captureFunction = captureAVX2_768
-		castleFunction = castleAVX2_768
-		evalFunction = getEvalAVX2_768
-		addSingleFunction = addSingleAVX2_768
-		subSingleFunction = subSingleAVX2_768
-
+		addSingleAVX2_768(a, w)
 	default:
 		panic("unsupported NNUE hidden size")
 	}
+}
+
+func nnueSubSingle(a, w *int16) {
+	if !hasAVX2 {
+		subSingleScalar(a, w)
+		return
+	}
+	switch NNUEHiddenSize {
+	case 64:
+		subSingleAVX2_64(a, w)
+	case 128:
+		subSingleAVX2_128(a, w)
+	case 256:
+		subSingleAVX2_256(a, w)
+	case 384:
+		subSingleAVX2_384(a, w)
+	case 512:
+		subSingleAVX2_512(a, w)
+	case 768:
+		subSingleAVX2_768(a, w)
+	default:
+		panic("unsupported NNUE hidden size")
+	}
+}
+
+func nnueMove(a0, a1 *int16, wFrom0, wTo0, wFrom1, wTo1 *int16) {
+	if !hasAVX2 {
+		moveScalar(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+		return
+	}
+	switch NNUEHiddenSize {
+	case 64:
+		moveAVX2_64(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	case 128:
+		moveAVX2_128(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	case 256:
+		moveAVX2_256(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	case 384:
+		moveAVX2_384(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	case 512:
+		moveAVX2_512(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	case 768:
+		moveAVX2_768(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	default:
+		panic("unsupported NNUE hidden size")
+	}
+}
+
+func nnueCapture(a0, a1 *int16, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1 *int16) {
+	if !hasAVX2 {
+		captureScalar(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+		return
+	}
+	switch NNUEHiddenSize {
+	case 64:
+		captureAVX2_64(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	case 128:
+		captureAVX2_128(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	case 256:
+		captureAVX2_256(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	case 384:
+		captureAVX2_384(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	case 512:
+		captureAVX2_512(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	case 768:
+		captureAVX2_768(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	default:
+		panic("unsupported NNUE hidden size")
+	}
+}
+
+func nnueCastle(a0, a1 *int16, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1 *int16) {
+	if !hasAVX2 {
+		castleScalar(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+		return
+	}
+	switch NNUEHiddenSize {
+	case 64:
+		castleAVX2_64(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	case 128:
+		castleAVX2_128(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	case 256:
+		castleAVX2_256(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	case 384:
+		castleAVX2_384(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	case 512:
+		castleAVX2_512(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	case 768:
+		castleAVX2_768(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	default:
+		panic("unsupported NNUE hidden size")
+	}
+}
+
+func nnueEval(a0, a1, w0, w1 *int16, sum *int32) {
+	if !hasAVX2 {
+		evalScalar(a0, a1, w0, w1, sum)
+		return
+	}
+	switch NNUEHiddenSize {
+	case 64:
+		getEvalAVX2_64(a0, a1, w0, w1, sum)
+	case 128:
+		getEvalAVX2_128(a0, a1, w0, w1, sum)
+	case 256:
+		getEvalAVX2_256(a0, a1, w0, w1, sum)
+	case 384:
+		getEvalAVX2_384(a0, a1, w0, w1, sum)
+	case 512:
+		getEvalAVX2_512(a0, a1, w0, w1, sum)
+	case 768:
+		getEvalAVX2_768(a0, a1, w0, w1, sum)
+	default:
+		panic("unsupported NNUE hidden size")
+	}
+}
+
+// nnueMove3/nnueCapture3/nnueCastle3: dst = src + delta in one pass,
+// replacing the old "copyFrom(src) then dst += delta" sequence.
+//
+// The fused AVX2 kernel only exists for size 512 (nnue_avx2_amd64.s), the
+// size actually shipped per the NNUEHiddenSize constant. Non-AVX2 builds
+// use the scalar three-operand versions for every size (plain Go, so
+// fusing them costs nothing extra to verify). The other five AVX2 sizes
+// -- unreachable today, kept only so NNUEHiddenSize can still be changed
+// to one of them -- fall back to copy + the original two-operand kernel,
+// which is exactly their pre-fusion behavior; writing *_3op assembly for
+// sizes nothing currently runs isn't worth the risk of an unverifiable
+// dead path.
+func nnueMove3(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1 *int16) {
+	if !hasAVX2 {
+		moveScalar3(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1)
+		return
+	}
+	if NNUEHiddenSize == 512 {
+		moveAVX2_512_3op(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1)
+		return
+	}
+	copyAccValues(dst0, src0)
+	copyAccValues(dst1, src1)
+	nnueMove(dst0, dst1, wFrom0, wTo0, wFrom1, wTo1)
+}
+
+func nnueCapture3(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1 *int16) {
+	if !hasAVX2 {
+		captureScalar3(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+		return
+	}
+	if NNUEHiddenSize == 512 {
+		captureAVX2_512_3op(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+		return
+	}
+	copyAccValues(dst0, src0)
+	copyAccValues(dst1, src1)
+	nnueCapture(dst0, dst1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+}
+
+func nnueCastle3(dst0, src0, dst1, src1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1 *int16) {
+	if !hasAVX2 {
+		castleScalar3(dst0, src0, dst1, src1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+		return
+	}
+	if NNUEHiddenSize == 512 {
+		castleAVX2_512_3op(dst0, src0, dst1, src1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+		return
+	}
+	copyAccValues(dst0, src0)
+	copyAccValues(dst1, src1)
+	nnueCastle(dst0, dst1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+}
+
+// copyAccValues copies one perspective's NNUEHiddenSize int16 values from
+// src to dst. A no-op when dst == src (the in-place update callers use).
+func copyAccValues(dst, src *int16) {
+	if dst == src {
+		return
+	}
+	copy(unsafe.Slice(dst, NNUEHiddenSize), unsafe.Slice(src, NNUEHiddenSize))
 }
 
 var zeroWeights [NNUEHiddenSize]int16
@@ -264,7 +380,9 @@ func (acc *Accumulator) addPiece(color, pt, sq, k0, k1 int) {
 
 // Move one piece without a capture. Loops are expensive,
 // so we use one instead of separate addition/deletion loops.
-func (acc *Accumulator) move(color, pt, from, to, k0, k1 int, refresh0, refresh1 bool) {
+// move computes dst = src + (feature deltas for a normal move). src may
+// alias dst (see nnueMove3).
+func (dst *Accumulator) move(src *Accumulator, color, pt, from, to, k0, k1 int, refresh0, refresh1 bool) {
 	var pFrom0, pTo0, pFrom1, pTo1 *int16
 
 	if refresh0 {
@@ -283,9 +401,9 @@ func (acc *Accumulator) move(color, pt, from, to, k0, k1 int, refresh0, refresh1
 		pTo1 = &nnueParams.InputWeights[featureIndex(color, pt, to, k1, 1)][0]
 	}
 
-	moveFunction(
-		&acc.values[0][0],
-		&acc.values[1][0],
+	nnueMove3(
+		&dst.values[0][0], &src.values[0][0],
+		&dst.values[1][0], &src.values[1][0],
 
 		pFrom0,
 		pTo0,
@@ -296,7 +414,8 @@ func (acc *Accumulator) move(color, pt, from, to, k0, k1 int, refresh0, refresh1
 
 }
 
-func (acc *Accumulator) capture(
+func (dst *Accumulator) capture(
+	src *Accumulator,
 	moverColor, moverPT, from, to int,
 	capturedColor, capturedPT, capturedSq int,
 	k0, k1 int, refresh0, refresh1 bool,
@@ -323,9 +442,9 @@ func (acc *Accumulator) capture(
 		pCap1 = &nnueParams.InputWeights[featureIndex(capturedColor, capturedPT, capturedSq, k1, 1)][0]
 	}
 
-	captureFunction(
-		&acc.values[0][0],
-		&acc.values[1][0],
+	nnueCapture3(
+		&dst.values[0][0], &src.values[0][0],
+		&dst.values[1][0], &src.values[1][0],
 
 		pTo0,
 		pFrom0,
@@ -338,7 +457,8 @@ func (acc *Accumulator) capture(
 
 }
 
-func (acc *Accumulator) castle(
+func (dst *Accumulator) castle(
+	src *Accumulator,
 	color, kingFrom, kingTo, rookFrom, rookTo int,
 	k0, k1 int, refresh0, refresh1 bool,
 ) {
@@ -368,9 +488,9 @@ func (acc *Accumulator) castle(
 		pRFrom1 = &nnueParams.InputWeights[featureIndex(color, R, rookFrom, k1, 1)][0]
 	}
 
-	castleFunction(
-		&acc.values[0][0],
-		&acc.values[1][0],
+	nnueCastle3(
+		&dst.values[0][0], &src.values[0][0],
+		&dst.values[1][0], &src.values[1][0],
 
 		pKFrom0,
 		pKTo0,
@@ -384,7 +504,7 @@ func (acc *Accumulator) castle(
 	)
 }
 
-func (acc *Accumulator) promotion(color, from, to, prom int, k0, k1 int, refresh0, refresh1 bool) {
+func (dst *Accumulator) promotion(src *Accumulator, color, from, to, prom int, k0, k1 int, refresh0, refresh1 bool) {
 	var pFrom0, pTo0, pFrom1, pTo1 *int16
 
 	if refresh0 {
@@ -403,9 +523,9 @@ func (acc *Accumulator) promotion(color, from, to, prom int, k0, k1 int, refresh
 		pTo1 = &nnueParams.InputWeights[featureIndex(color, prom, to, k1, 1)][0]
 	}
 
-	moveFunction(
-		&acc.values[0][0],
-		&acc.values[1][0],
+	nnueMove3(
+		&dst.values[0][0], &src.values[0][0],
+		&dst.values[1][0], &src.values[1][0],
 
 		pFrom0,
 		pTo0,
@@ -415,7 +535,7 @@ func (acc *Accumulator) promotion(color, from, to, prom int, k0, k1 int, refresh
 	)
 }
 
-func (acc *Accumulator) promotionCapture(color, from, to, prom, captType int, k0, k1 int, refresh0, refresh1 bool) {
+func (dst *Accumulator) promotionCapture(src *Accumulator, color, from, to, prom, captType int, k0, k1 int, refresh0, refresh1 bool) {
 	enemy := color ^ 1
 	var pTo0, pFrom0, pCap0, pTo1, pFrom1, pCap1 *int16
 
@@ -439,9 +559,9 @@ func (acc *Accumulator) promotionCapture(color, from, to, prom, captType int, k0
 		pCap1 = &nnueParams.InputWeights[featureIndex(enemy, captType, to, k1, 1)][0]
 	}
 
-	captureFunction(
-		&acc.values[0][0],
-		&acc.values[1][0],
+	nnueCapture3(
+		&dst.values[0][0], &src.values[0][0],
+		&dst.values[1][0], &src.values[1][0],
 
 		pTo0,
 		pFrom0,
@@ -453,8 +573,12 @@ func (acc *Accumulator) promotionCapture(color, from, to, prom, captType int, k0
 	)
 }
 
-// apply full nnue accumulator update
-func (acc *Accumulator) applyPendingChanges(p *Pos, u *Update, ss *SearchState) {
+// apply full nnue accumulator update: acc = src + (feature deltas for
+// u's move). src may be acc itself (in-place update, e.g. datagen
+// advancing the game accumulator, or applyMoves in uci.go) or a distinct
+// parent accumulator (search descending to a new ply) -- see
+// nnueMove3/nnueCapture3/nnueCastle3.
+func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update, ss *SearchState) {
 
 	// already applied
 	if !u.dirty {
@@ -476,22 +600,22 @@ func (acc *Accumulator) applyPendingChanges(p *Pos, u *Update, ss *SearchState) 
 
 	switch u.flag {
 	case uNORMAL, uEP_SET:
-		acc.move(u.color, u.movingType, u.from, u.to, k0, k1, refresh0, refresh1)
+		acc.move(src, u.color, u.movingType, u.from, u.to, k0, k1, refresh0, refresh1)
 
 	case uCAPTURE:
-		acc.capture(u.color, u.movingType, u.from, u.to, u.color^1, u.captType, u.capSq, k0, k1, refresh0, refresh1)
+		acc.capture(src, u.color, u.movingType, u.from, u.to, u.color^1, u.captType, u.capSq, k0, k1, refresh0, refresh1)
 
 	case uEP_CAP:
-		acc.capture(u.color, P, u.from, u.to, u.color^1, P, u.capSq, k0, k1, refresh0, refresh1)
+		acc.capture(src, u.color, P, u.from, u.to, u.color^1, P, u.capSq, k0, k1, refresh0, refresh1)
 
 	case uCASTLE:
-		acc.castle(u.color, u.from, u.to, u.rookFrom, u.rookTo, k0, k1, refresh0, refresh1)
+		acc.castle(src, u.color, u.from, u.to, u.rookFrom, u.rookTo, k0, k1, refresh0, refresh1)
 
 	case uPROMO:
-		acc.promotion(u.color, u.from, u.to, u.prom, k0, k1, refresh0, refresh1)
+		acc.promotion(src, u.color, u.from, u.to, u.prom, k0, k1, refresh0, refresh1)
 
 	case uPROMCAPT:
-		acc.promotionCapture(u.color, u.from, u.to, u.prom, u.captType, k0, k1, refresh0, refresh1)
+		acc.promotionCapture(src, u.color, u.from, u.to, u.prom, u.captType, k0, k1, refresh0, refresh1)
 
 	}
 
@@ -522,7 +646,7 @@ func (ss *SearchState) refreshPerspectiveWithFinny(p *Pos, acc *Accumulator, per
 
 	entry := &ss.finny[perspective][mirror]
 
-	if !entry.valid {
+	if !entry.valid || entry.generation != nnue.generation {
 		// Initialize accumulator from biases
 		copy(entry.acc[:NNUEHiddenSize], nnueParams.InputBiases[:NNUEHiddenSize])
 		entryAccPtr := &entry.acc[0]
@@ -538,9 +662,10 @@ func (ss *SearchState) refreshPerspectiveWithFinny(p *Pos, acc *Accumulator, per
 				bb &= bb - 1
 				idx := featureIndex(c, pt, sq, kSq, perspective)
 				w := &nnueParams.InputWeights[idx][0]
-				addSingleFunction(entryAccPtr, w)
+				nnueAddSingle(entryAccPtr, w)
 			}
 		}
+		entry.generation = nnue.generation
 		entry.valid = true
 	} else {
 		entryAccPtr := &entry.acc[0]
@@ -561,7 +686,7 @@ func (ss *SearchState) refreshPerspectiveWithFinny(p *Pos, acc *Accumulator, per
 				added &= added - 1
 				idx := featureIndex(c, pt, sq, kSq, perspective)
 				w := &nnueParams.InputWeights[idx][0]
-				addSingleFunction(entryAccPtr, w)
+				nnueAddSingle(entryAccPtr, w)
 			}
 
 			// Removed pieces
@@ -571,7 +696,7 @@ func (ss *SearchState) refreshPerspectiveWithFinny(p *Pos, acc *Accumulator, per
 				removed &= removed - 1
 				idx := featureIndex(c, pt, sq, kSq, perspective)
 				w := &nnueParams.InputWeights[idx][0]
-				subSingleFunction(entryAccPtr, w)
+				nnueSubSingle(entryAccPtr, w)
 			}
 
 			entry.pieces[pc] = currBB
@@ -604,7 +729,7 @@ func refreshPerspective(p *Pos, acc *Accumulator, perspective int) {
 		idx := featureIndex(color, pt, sq, kSq, perspective)
 		w := &nnueParams.InputWeights[idx][0]
 
-		addSingleFunction(a, w)
+		nnueAddSingle(a, w)
 	}
 }
 
@@ -657,7 +782,7 @@ func (acc *Accumulator) getEval(p *Pos, stm int) int {
 	bucket := outputBucket(p)
 	var sum int32
 
-	evalFunction(
+	nnueEval(
 		&acc.values[stm][0],
 		&acc.values[stm^1][0],
 		&nnueParams.OutputWeights[bucket][0][0],
@@ -673,12 +798,11 @@ func (acc *Accumulator) getEval(p *Pos, stm int) int {
 
 func nnueLoadFromBytes(data []byte) bool {
 	if len(data) < SingleBucketNetSize {
-		nnue.Loaded = false
 		return false
 	}
 
 	offset := 0
-	nnueParams = new(NNUEParameters)
+	nextParams := new(NNUEParameters)
 
 	readI16 := func() int16 {
 		value := int16(
@@ -691,27 +815,27 @@ func nnueLoadFromBytes(data []byte) bool {
 
 	for input := 0; input < NNUEInputSize; input++ {
 		for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
-			nnueParams.InputWeights[input][neuron] = readI16()
+			nextParams.InputWeights[input][neuron] = readI16()
 		}
 	}
 
 	for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
-		nnueParams.InputBiases[neuron] = readI16()
+		nextParams.InputBiases[neuron] = readI16()
 	}
 
 	// 8 Output Buckets vs Single Output Bucket
 	if len(data) >= OutputBucketNetSize {
 		for b := 0; b < OutputBuckets; b++ {
 			for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
-				nnueParams.OutputWeights[b][0][neuron] = readI16()
+				nextParams.OutputWeights[b][0][neuron] = readI16()
 			}
 			for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
-				nnueParams.OutputWeights[b][1][neuron] = readI16()
+				nextParams.OutputWeights[b][1][neuron] = readI16()
 			}
 		}
 
 		for b := 0; b < OutputBuckets; b++ {
-			nnueParams.OutputBiases[b] = readI16()
+			nextParams.OutputBiases[b] = readI16()
 		}
 	} else {
 		// Single Output Bucket fallback - broadcast weights to all 8 buckets
@@ -727,12 +851,14 @@ func nnueLoadFromBytes(data []byte) bool {
 		bias := readI16()
 
 		for b := 0; b < OutputBuckets; b++ {
-			nnueParams.OutputWeights[b][0] = stmWeights
-			nnueParams.OutputWeights[b][1] = ntmWeights
-			nnueParams.OutputBiases[b] = bias
+			nextParams.OutputWeights[b][0] = stmWeights
+			nextParams.OutputWeights[b][1] = ntmWeights
+			nextParams.OutputBiases[b] = bias
 		}
 	}
 
+	nnueParams = nextParams
+	nnue.generation++
 	nnue.Loaded = true
 	return true
 }
@@ -745,7 +871,6 @@ func nnueInitEmbedded() bool {
 func nnueLoad(path string) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		nnue.Loaded = false
 		return false
 	}
 	return nnueLoadFromBytes(data)

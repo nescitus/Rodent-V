@@ -2,44 +2,99 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type dgEntry struct {
-	fen   string
-	eval  int // White perspective
-	score float64
+var datagenMode bool = false
+
+// bookIndex holds an opening-book file as one raw byte buffer plus a flat
+// table of per-line [start,end) offsets, instead of one string per line.
+// The reference UHO book is 2.6M lines; holding that as []string would
+// leave 2.6M separate pointers for the GC to rescan on every cycle for the
+// life of the run. offsets has no pointers at all, so only two allocations
+// (data and offsets) are ever live regardless of book size.
+type bookIndex struct {
+	data    []byte
+	offsets []uint32 // pairs: offsets[2*i], offsets[2*i+1] = start, end of line i
 }
 
-var datagenMode bool = false
+func isASCIISpace(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n', '\r', '\v', '\f':
+		return true
+	}
+	return false
+}
+
+// indexBookLines finds the trimmed [start,end) byte range of every
+// non-blank line in data, matching bufio.Scanner + strings.TrimSpace +
+// skip-empty semantics without allocating a string per line.
+func indexBookLines(data []byte) []uint32 {
+	offsets := make([]uint32, 0, 2*(len(data)/64+1))
+	lineStart := 0
+	for i := 0; i <= len(data); i++ {
+		if i == len(data) || data[i] == '\n' {
+			s, e := lineStart, i
+			for s < e && isASCIISpace(data[s]) {
+				s++
+			}
+			for e > s && isASCIISpace(data[e-1]) {
+				e--
+			}
+			if e > s {
+				offsets = append(offsets, uint32(s), uint32(e))
+			}
+			lineStart = i + 1
+		}
+	}
+	return offsets
+}
+
+func loadBookIndex(path string) (*bookIndex, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return &bookIndex{data: data, offsets: indexBookLines(data)}, nil
+}
+
+func (bi *bookIndex) numLines() int {
+	if bi == nil {
+		return 0
+	}
+	return len(bi.offsets) / 2
+}
+
+func (bi *bookIndex) line(i int) string {
+	s, e := bi.offsets[2*i], bi.offsets[2*i+1]
+	return string(bi.data[s:e])
+}
 
 func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 	fmt.Printf("Starting datagen: %d target positions, %d threads, %d nodes/move\n", targetPositions, threads, nodesPerMove)
-	allocTT(16)
 	datagenMode = true
 
-	var bookFENs []string
+	// datagen is a batch process, not the UCI engine: the soft memory limit
+	// in updateMemoryLimit is sized for one global hash table and badly
+	// undercounts N private per-thread tables plus a multi-hundred-MB
+	// opening book, which previously drove the GC into near-continuous
+	// collection. A batch run doesn't need a memory ceiling, so disable it
+	// and let the default pacer manage the (now much smaller) live set.
+	disableMemoryLimit()
+
+	var book *bookIndex
 	if bookFile != "" {
-		bf, err := os.Open(bookFile)
-		if err == nil {
-			scanner := bufio.NewScanner(bf)
-			for scanner.Scan() {
-				line := strings.TrimSpace(scanner.Text())
-				if line != "" {
-					bookFENs = append(bookFENs, line)
-				}
-			}
-			bf.Close()
-			fmt.Printf("Loaded %d positions from book %s\n", len(bookFENs), bookFile)
-		} else {
+		b, err := loadBookIndex(bookFile)
+		if err != nil {
 			fmt.Printf("Warning: could not open book file %s, using startpos\n", bookFile)
+		} else {
+			book = b
+			fmt.Printf("Loaded %d positions from book %s\n", book.numLines(), bookFile)
 		}
 	}
 
@@ -92,13 +147,21 @@ func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 			ss.tt = new(TTable)
 			ss.tt.alloc(1)
 			ss.isUsingNNUE = nnue.Loaded && singleOptionValue[NnuePerc] > 0
+			// Private eval/pawn hash tables, same sizing as the shared
+			// global ones (eval.go's init), so 16 threads don't race on
+			// the same 24-byte entries -- see evalHash/pawnHash on
+			// SearchState.
+			ss.evalHash = newEvalHashTable(128 * 128)
+			ss.pawnHash = newPawnHashTable(64 * 128)
+
+			var vb ViriBuffer // reused across games; Reset() keeps its backing array
 
 			for {
 				if atomic.LoadInt64(&totalPositions) >= int64(targetPositions) {
 					return
 				}
 
-				vb, posCount, played := dgPlayGame(rng, ss, nodesPerMove, bookFENs)
+				posCount, played := dgPlayGame(rng, ss, &vb, nodesPerMove, book)
 				if !played || posCount == 0 {
 					continue
 				}
@@ -116,12 +179,12 @@ func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 	fmt.Printf("Datagen complete. Total games: %d, Total positions: %d\n", atomic.LoadInt64(&totalGames), atomic.LoadInt64(&totalPositions))
 }
 
-func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []string) (ViriBuffer, int, bool) {
+func dgPlayGame(rng *rand.Rand, ss *SearchState, vb *ViriBuffer, nodesPerMove int, book *bookIndex) (int, bool) {
 	var p Pos
 
 	numRandom := 0
-	if len(bookFENs) > 0 {
-		fen := bookFENs[rng.Intn(len(bookFENs))]
+	if book.numLines() > 0 {
+		fen := book.line(rng.Intn(book.numLines()))
 		parseFEN(&p, fen)
 		numRandom = rng.Intn(10) // 0 to 9 random moves from book pos
 	} else {
@@ -139,17 +202,18 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 		legalCount := 0
 		for j := 0; j < total; j++ {
 			move := list[j]
-			var child Pos = p
 			var u Update
 			var r Revert
-			makeMove(&child, &u, &r, move)
-			if !child.selfInCheck() {
+			makeMove(&p, &u, &r, move)
+			legal := !p.selfInCheck()
+			unmakeMove(&p, &u, &r)
+			if legal {
 				legals[legalCount] = move
 				legalCount++
 			}
 		}
 		if legalCount == 0 {
-			return ViriBuffer{}, 0, false
+			return 0, false
 		}
 		move := legals[rng.Intn(legalCount)]
 		var u Update
@@ -160,10 +224,14 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 		}
 	}
 
+	// New game: age out the previous game's TT entries so replacement
+	// isn't purely depth-preferent (see runDatagenSearch for the per-move
+	// aging that keeps this working within a game).
+	ss.tt.clear()
+
 	// Make sure NNUE is ready
 	refresh(&p, &ss.accStack[0])
 
-	var vb ViriBuffer
 	vb.Reset()
 	vb.WriteBoard(&p, p.clock, 1)
 
@@ -247,12 +315,12 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 			p.histLen = 0
 		}
 		if ss.isUsingNNUE {
-			ss.accStack[0].applyPendingChanges(&p, &u, ss)
+			ss.accStack[0].applyPendingChanges(&ss.accStack[0], &p, &u, ss)
 		}
 	}
 
 	if numEntries == 0 {
-		return vb, 0, false
+		return 0, false
 	}
 
 	wdl := 1
@@ -264,7 +332,7 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 	}
 	vb.PatchWDL(wdl)
 
-	return vb, numEntries, true
+	return numEntries, true
 }
 
 func isRepetitionDG(p *Pos) bool {
@@ -281,7 +349,14 @@ func isRepetitionDG(p *Pos) bool {
 }
 
 func runDatagenSearch(p *Pos, ss *SearchState, softNodesLimit int) (int, int) {
-	ss.resetForSearch(p)
+	// Age the TT for this move. datagen never calls think(), which is the
+	// only other caller of newDate(); without this, t.date stays 0 for the
+	// whole run and the replacement policy degenerates to pure
+	// depth-preference, never evicting stale entries from earlier moves.
+	ss.tt.newDate()
+	if ss.resetForSearch(p) {
+		ss.clearSearchHashes()
+	}
 
 	// Capped soft limit: cap search at 1.5x - 2x soft limit to prevent pathological node explosions
 	hardLimit := int64(softNodesLimit) * 3 / 2
@@ -341,23 +416,4 @@ func runDatagenSearch(p *Pos, ss *SearchState, softNodesLimit int) (int, int) {
 	ss.nodesLimit = 0
 
 	return bestMove, score
-}
-
-func countLines(filename string) (int64, error) {
-	file, err := os.Open(filename)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	var count int64
-	buf := make([]byte, 32*1024)
-	for {
-		c, err := file.Read(buf)
-		count += int64(bytes.Count(buf[:c], []byte{'\n'}))
-		if err != nil {
-			break
-		}
-	}
-	return count, nil
 }
