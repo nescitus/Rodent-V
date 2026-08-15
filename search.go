@@ -812,7 +812,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// Does the move give check?
 		givesCheck := moveGivesCheck(p, move)
 
-				// Late move pruning: skip quiet moves beyond the threshold.
+		// Late move pruning: skip quiet moves beyond the threshold.
 		// Moves that give check are exempt — they may be the only defence
 		// or the only way to continue a mating attack.
 		// When improving we allow more moves (position is trending up, so
