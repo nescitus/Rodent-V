@@ -305,7 +305,7 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, vb *ViriBuffer, nodesPerMove in
 			p.histLen = 0
 		}
 		if ss.isUsingNNUE {
-			ss.accStack[0].applyPendingChanges(&p, &u, ss)
+			ss.accStack[0].applyPendingChanges(&ss.accStack[0], &p, &u, ss)
 		}
 	}
 
