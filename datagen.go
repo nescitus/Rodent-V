@@ -139,14 +139,14 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 		legalCount := 0
 		for j := 0; j < total; j++ {
 			move := list[j]
-			var child Pos = p
 			var u Update
 			var r Revert
-			makeMove(&child, &u, &r, move)
-			if !child.selfInCheck() {
+			makeMove(&p, &u, &r, move)
+			if !p.selfInCheck() {
 				legals[legalCount] = move
 				legalCount++
 			}
+			unmakeMove(&p, &u, &r)
 		}
 		if legalCount == 0 {
 			return ViriBuffer{}, 0, false
@@ -160,7 +160,8 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 		}
 	}
 
-	// Make sure NNUE is ready
+	// Make sure NNUE & Finny cache are ready for the new game
+	ss.finny = [2][2]FinnyEntry{}
 	refresh(&p, &ss.accStack[0])
 
 	var vb ViriBuffer
@@ -205,19 +206,19 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, nodesPerMove int, bookFENs []st
 		}
 
 		if absScore < 30000 {
-			// Draw adjudication
-			if absScore <= 10 {
+			// Draw adjudication: if score remains within [-15, 15] cp for 8 half-moves after ply 30
+			if absScore <= 15 {
 				drawCount++
 			} else {
 				drawCount = 0
 			}
-			if drawCount >= 10 && ply >= 40 {
+			if drawCount >= 8 && ply >= 30 {
 				result = 0.5
 				break
 			}
 
-			// Resignation / overwhelming lead adjudication
-			if absScore > 1500 {
+			// Resignation / overwhelming lead adjudication (|score| >= 1000 cp for 3 half-moves)
+			if absScore >= 1000 {
 				resignCount++
 				if resignCount >= 3 {
 					if score > 0 {
@@ -281,14 +282,9 @@ func isRepetitionDG(p *Pos) bool {
 }
 
 func runDatagenSearch(p *Pos, ss *SearchState, softNodesLimit int) (int, int) {
+	ss.tt.newDate()
 	ss.resetForSearch(p)
-
-	// Capped soft limit: cap search at 1.5x - 2x soft limit to prevent pathological node explosions
-	hardLimit := int64(softNodesLimit) * 3 / 2
-	if hardLimit < 7500 {
-		hardLimit = 7500
-	}
-	ss.nodesLimit = hardLimit
+	ss.nodesLimit = int64(softNodesLimit)
 
 	var pv [maxPly]int
 	score := 0

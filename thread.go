@@ -137,6 +137,7 @@ func (ss *SearchState) clearHistory() {
 	ss.nonPawnCorrHist = [2][2][corrHistSize]int16{}
 	ss.majorCorrHist = [2][2][corrHistSize]int16{}
 	ss.minorCorrHist = [2][2][corrHistSize]int16{}
+	ss.finny = [2][2]FinnyEntry{}
 	for i := range ss.moveBuffers {
 		ss.moveBuffers[i].p = nil
 		ss.moveBuffers[i].ss = nil
@@ -168,7 +169,6 @@ func (ss *SearchState) resetForSearch(p *Pos) {
 	ss.excludedRootMoves = ss.excludedRootMoves[:0]
 
 	ss.isUsingNNUE = nnue.Loaded && singleOptionValue[NnuePerc] > 0
-	ss.finny = [2][2]FinnyEntry{}
 
 	// KBN vs K: switch to pure HCE so checkmateHelper's corner-driving
 	// tables are used instead of NNUE, which has no understanding of the
