@@ -787,6 +787,134 @@ castle_512_loop:
 	VZEROUPPER
 	RET
 
+// ---- three-operand (dst = src + delta) variants, 512 hidden neurons ----
+//
+// Same instruction sequence as moveAVX2_512/captureAVX2_512/castleAVX2_512
+// above, except the first load of each perspective comes from a separate
+// src pointer instead of re-reading (and later re-writing) the same dst
+// address. This lets the caller skip the explicit 2048-byte copyFrom that
+// used to precede every one of these calls: previously "copy parent to
+// child, then child += delta", now "child = parent + delta" in one pass.
+// dst may alias src (some callers update an accumulator in place across a
+// move sequence, not into a fresh ply); that degrades to the same
+// load-modify-store as before with no behavior change.
+
+TEXT ·moveAVX2_512_3op(SB), NOSPLIT, $0-64
+	MOVQ dst0+0(FP), AX
+	MOVQ src0+8(FP), BX
+	MOVQ dst1+16(FP), CX
+	MOVQ src1+24(FP), DX
+
+	MOVQ wFrom0+32(FP), SI
+	MOVQ wTo0+40(FP), DI
+
+	MOVQ wFrom1+48(FP), R8
+	MOVQ wTo1+56(FP), R9
+
+	XORQ R10, R10
+
+move3_loop_512:
+	// Perspective 0: dst0 = src0 + wTo0 - wFrom0
+	VMOVDQU (BX)(R10*1), Y0
+	VPADDW  (DI)(R10*1), Y0, Y0
+	VPSUBW  (SI)(R10*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R10*1)
+
+	// Perspective 1: dst1 = src1 + wTo1 - wFrom1
+	VMOVDQU (DX)(R10*1), Y1
+	VPADDW  (R9)(R10*1), Y1, Y1
+	VPSUBW  (R8)(R10*1), Y1, Y1
+	VMOVDQU Y1, (CX)(R10*1)
+
+	ADDQ $32, R10
+	CMPQ R10, $1024
+	JB move3_loop_512
+
+	VZEROUPPER
+	RET
+
+TEXT ·captureAVX2_512_3op(SB), NOSPLIT, $0-80
+	MOVQ dst0+0(FP), AX
+	MOVQ src0+8(FP), BX
+	MOVQ dst1+16(FP), CX
+	MOVQ src1+24(FP), DX
+
+	MOVQ wTo0+32(FP), SI
+	MOVQ wFrom0+40(FP), DI
+	MOVQ wCap0+48(FP), R8
+
+	MOVQ wTo1+56(FP), R9
+	MOVQ wFrom1+64(FP), R10
+	MOVQ wCap1+72(FP), R11
+
+	XORQ R12, R12
+
+capture3_loop_512:
+	// Perspective 0: dst0 = src0 + wTo0 - wFrom0 - wCap0
+	VMOVDQU (BX)(R12*1), Y0
+	VPADDW  (SI)(R12*1), Y0, Y0
+	VPSUBW  (DI)(R12*1), Y0, Y0
+	VPSUBW  (R8)(R12*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R12*1)
+
+	// Perspective 1: dst1 = src1 + wTo1 - wFrom1 - wCap1
+	VMOVDQU (DX)(R12*1), Y1
+	VPADDW  (R9)(R12*1), Y1, Y1
+	VPSUBW  (R10)(R12*1), Y1, Y1
+	VPSUBW  (R11)(R12*1), Y1, Y1
+	VMOVDQU Y1, (CX)(R12*1)
+
+	ADDQ $32, R12
+	CMPQ R12, $1024
+	JB capture3_loop_512
+
+	VZEROUPPER
+	RET
+
+TEXT ·castleAVX2_512_3op(SB), NOSPLIT, $0-96
+	MOVQ dst0+0(FP), AX
+	MOVQ src0+8(FP), BX
+	MOVQ dst1+16(FP), CX
+	MOVQ src1+24(FP), DX
+
+	MOVQ wKFrom0+32(FP), SI
+	MOVQ wKTo0+40(FP), DI
+	MOVQ wRFrom0+48(FP), R8
+	MOVQ wRTo0+56(FP), R9
+
+	MOVQ wKFrom1+64(FP), R10
+	MOVQ wKTo1+72(FP), R11
+	MOVQ wRFrom1+80(FP), R12
+	MOVQ wRTo1+88(FP), R13
+
+	XORQ R14, R14
+
+castle3_loop_512:
+	// Perspective 0: dst0 = src0 + kingTo - kingFrom + rookTo - rookFrom
+	VMOVDQU (BX)(R14*1), Y0
+	VPADDW  (DI)(R14*1), Y0, Y0
+	VPSUBW  (SI)(R14*1), Y0, Y0
+	VPADDW  (R9)(R14*1), Y0, Y0
+	VPSUBW  (R8)(R14*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R14*1)
+
+	// Perspective 1: dst1 = src1 + kingTo - kingFrom + rookTo - rookFrom
+	VMOVDQU (DX)(R14*1), Y1
+	VPADDW  (R11)(R14*1), Y1, Y1
+	VPSUBW  (R10)(R14*1), Y1, Y1
+	VPADDW  (R13)(R14*1), Y1, Y1
+	VPSUBW  (R12)(R14*1), Y1, Y1
+	VMOVDQU Y1, (CX)(R14*1)
+
+	ADDQ $32, R14
+
+	// 512 int16 neurons = 1024 bytes
+	CMPQ R14, $1024
+	JB castle3_loop_512
+
+	VZEROUPPER
+	RET
+
 // functions for 768 hidden neurons
 
 TEXT ·captureAVX2_768(SB), NOSPLIT, $0-64

@@ -63,6 +63,7 @@
 package main
 
 import (
+	"math"
 	"runtime/debug"
 	"sync/atomic"
 	"unsafe"
@@ -111,9 +112,17 @@ func unpackTTData(d uint64) (move, score, depth, bound, date int) {
 
 // ---- TT management ----
 
-// alloc allocates a transposition table of approximately mbSize
-// megabytes.  The size is rounded down to the nearest power of 2
-// so that the index mask trick works.  Always clears the table.
+// alloc allocates a transposition table sized as a power of 2 so the
+// index mask trick works: the loop below finds the smallest power of 2
+// STRICTLY GREATER than mbSize, e.g. alloc(16) allocates 32 MiB, not 16.
+// (mbSize itself is not a valid result even when it's already a power of
+// 2, since the loop condition is size<=mbSize.) This is deliberately
+// left as-is rather than "fixed" to allocate mbSize or less: every call
+// site already assumes today's effective sizes, and changing them would
+// shrink the TT for a given Hash setting, which is a search-tree-visible
+// behavior change requiring its own non-regression test -- see
+// updateMemoryLimit for where this is accounted for correctly. Always
+// clears the table.
 func (t *TTable) alloc(mbSize int) {
 	size := 2
 	for size <= mbSize {
@@ -166,14 +175,14 @@ func (t *TTable) hashfull() int {
 	return (active * 1000) / sampleSize
 }
 
-var currentHashMB int = 16
-
+// updateMemoryLimit resizes the Go soft memory limit to the engine's real
+// live heap plus headroom. hashBytes below is deliberately the table's
+// actual allocated size (t.size * entry size), not currentHashMB*1MB --
+// alloc() always rounds up to a power of 2 strictly greater than the
+// requested MB (see alloc's comment), so accounting the requested size
+// would undercount by up to 2x.
 func updateMemoryLimit() {
-	mb := currentHashMB
-	if mb <= 0 {
-		mb = 16
-	}
-	hashBytes := int64(mb) * 1024 * 1024
+	hashBytes := int64(mainTT.size) * int64(unsafe.Sizeof(Entry{}))
 	threadBytes := int64(numThreads) * searchStateSize
 	nnueBytes := int64(unsafe.Sizeof(NNUEParameters{}))
 	bookBytes := int64(len(mainBook.entries)+len(guideBook.entries)) * int64(unsafe.Sizeof(PolyglotEntry{}))
@@ -189,7 +198,6 @@ func updateMemoryLimit() {
 }
 
 func allocTT(mbSize int) {
-	currentHashMB = mbSize
 	mainTT.alloc(mbSize)
 	updateMemoryLimit()
 }
@@ -200,6 +208,15 @@ func clearTT() {
 
 func reclaimOSMemory() {
 	debug.FreeOSMemory()
+}
+
+// disableMemoryLimit removes the soft memory ceiling entirely. Used by
+// batch tools (datagen) whose live heap — N private per-thread tables plus
+// a large opening book — the UCI-oriented sizing in updateMemoryLimit does
+// not model; a batch run has no other resource to protect and the default
+// GC pacer handles its stable live set fine on its own.
+func disableMemoryLimit() {
+	debug.SetMemoryLimit(math.MaxInt64)
 }
 
 func ttHashfull() int { return mainTT.hashfull() }

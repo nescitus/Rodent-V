@@ -59,7 +59,10 @@ func filterQuietBulletFile(inputPath string, outputPath string) error {
 		go func() {
 			defer wg.Done()
 			var ss SearchState
-			ss.tt = &mainTT
+			ss.tt = new(TTable)
+			ss.tt.alloc(1)
+			ss.evalHash = newEvalHashTable(128 * 128)
+			ss.pawnHash = newPawnHashTable(64 * 128)
 			var p Pos
 			for j := range jobs {
 				res := result{line: j.line, status: filterNoisy}
@@ -127,14 +130,16 @@ func testQuietPositionWithState(fen string, p *Pos, ss *SearchState) (filterResu
 		return filterInCheck, nil
 	}
 
-	ss.resetForSearch(p)
+	if ss.resetForSearch(p) {
+		ss.clearSearchHashes()
+	}
 	refresh(p, &ss.accStack[0])
 
 	atomic.StoreInt32(&abortFlag, 0)
 	hardTimeLimit = -1
 	singleOptionValue[NodesLimit] = 0
 
-	staticScore := evaluate(p, &ss.accStack[0])
+	staticScore := evaluate(p, &ss.accStack[0], ss)
 
 	var pv [maxPly]int
 	qsScore := ss.quiesce(p, 0, -inf, inf, pv[:])

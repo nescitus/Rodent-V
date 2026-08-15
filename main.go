@@ -40,6 +40,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/pprof"
 	"strconv"
 )
 
@@ -52,6 +53,18 @@ func init() {
 }
 
 func main() {
+	// Opt-in CPU profiling for regenerating default.pgo.
+	if profPath := os.Getenv("RODENT_CPUPROFILE"); profPath != "" {
+		f, err := os.Create(profPath)
+		if err != nil {
+			fmt.Println("could not create CPU profile:", err)
+		} else if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Println("could not start CPU profile:", err)
+		} else {
+			defer pprof.StopCPUProfile()
+		}
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "genmagics" {
 		FindMagics()
 		return
@@ -99,7 +112,6 @@ func main() {
 				fmt.Println("usage: rodent-v filter <input.txt> <output.txt>")
 				return
 			}
-			allocTT(16)
 			err := filterQuietBulletFile(os.Args[2], os.Args[3])
 			if err != nil {
 				fmt.Println("Error:", err)
@@ -108,16 +120,16 @@ func main() {
 		case "alloptions":
 			// Engine will hide personality path and print UCI options.
 			// No return statement, we want to use Rodent like that!
-			readPersonalityFiles = false 
+			readPersonalityFiles = false
 		case "nooptions":
 			// Engine will hide all the personality options.
 			// No return statement, we want to use Rodent like that!
-			noOptions = true 
+			noOptions = true
 		case "pesto":
 			// Engine will run a piece/square only eval.
 			// No return statement, we want to use Rodent like that!
 			pestoEval = true
-			noOptions = true 
+			noOptions = true
 
 			// case "loadsnapshot":
 			// 	if len(os.Args) < 3 {

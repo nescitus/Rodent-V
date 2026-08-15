@@ -499,7 +499,7 @@ func tv2BuildDataset(lines []string, initParams *[tv2NumParams]tv2Pair) []tv2Ent
 		parseFEN(&pos, line)
 		result := parseResultFromLine(line)
 
-		engineScore := float64(eval_internal(&pos, false))
+		engineScore := float64(eval_internal(&pos, false, nil))
 		if pos.side == Black {
 			engineScore = -engineScore
 		}

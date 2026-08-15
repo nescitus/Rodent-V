@@ -30,18 +30,28 @@ import (
 	"time"
 )
 
-// kbnModeEverCleared is set to true the first time the engine enters KBN-mode
-// within a game, so the hash flush is not repeated on every move.
-var kbnModeEverCleared bool
-
 // SearchState holds all per-thread mutable search context.
 type SearchState struct {
-	isUsingNNUE   bool
-	kbnModeActive bool    // true while in a KBN vs K endgame; forces pure HCE
+	isUsingNNUE bool
+	// kbnModeActive is true while in a KBN vs K endgame; forces pure HCE.
+	kbnModeActive bool
 	isMainThread  bool    // true only for states[0]; lazy-SMP helpers never report UCI "info" lines
 	tt            *TTable // pointer to transposition table
 
-	staticEval EvalFunc
+	// evalHash/pawnHash are nil for the normal UCI/search path, which
+	// falls back to the shared global tables (evalHashFor/pawnHashFor).
+	// Batch workers use private tables instead: shared unsynchronized
+	// reads/writes could tear a multiword entry and return the wrong score
+	// for a key, which datagen could then write into training data.
+	evalHash *evalHashTable
+	pawnHash *pawnHashTable
+
+	// evalMode selects which function staticEval() dispatches to.  Was
+	// previously a method value stored in a func-typed field, which made
+	// every evaluation an indirect (non-inlinable) call; a small enum
+	// switched on directly lets the compiler inline the chosen path.
+	evalMode       EvalMode
+	nnueGeneration uint64 // network generation used by the previous search
 
 	// ---- Progress (reset each think) ----
 	nodes          int64 // nodes searched by this thread
@@ -86,9 +96,10 @@ type SearchState struct {
 }
 
 type FinnyEntry struct {
-	acc    [NNUEHiddenSize]int16
-	pieces [12]uint64
-	valid  bool
+	acc        [NNUEHiddenSize]int16
+	pieces     [12]uint64
+	generation uint64
+	valid      bool
 }
 
 // State destroyed by makeMove.
@@ -144,10 +155,14 @@ func (ss *SearchState) clearHistory() {
 	}
 }
 
-// resetForSearch prepares ss for a new search without losing
-// accumulated history signal.  It resets progress counters,
-// per-ply context, and killers (which are root-position specific).
-func (ss *SearchState) resetForSearch(p *Pos) {
+// resetForSearch prepares ss for a new search without losing accumulated
+// history signal. It returns true when cached scores were produced by a
+// different evaluation regime; the caller must then clear the hash tables
+// it exclusively owns.
+func (ss *SearchState) resetForSearch(p *Pos) bool {
+	previousEvalMode := ss.evalMode
+	previousNNUEGeneration := ss.nnueGeneration
+
 	ss.nodes = 0
 	ss.aborting = false
 	ss.completedDepth = 0
@@ -172,40 +187,52 @@ func (ss *SearchState) resetForSearch(p *Pos) {
 
 	// KBN vs K: switch to pure HCE so checkmateHelper's corner-driving
 	// tables are used instead of NNUE, which has no understanding of the
-	// correct mating corner.  On the first move we enter this endgame,
-	// flush all three hash tables so stale NNUE-scored entries cannot
-	// be returned by the eval- or main-TT probes.
+	// correct mating corner. Hash invalidation belongs to the table owner:
+	// UCI helpers share tables, while datagen and filter workers do not.
 	ss.kbnModeActive = isKBNEndgame(p)
-	if ss.kbnModeActive && !kbnModeEverCleared {
-		kbnModeEverCleared = true
-		clearTT()
-		clearEvalHash()
-		clearPawnHash()
-	}
-	if !ss.kbnModeActive {
-		kbnModeEverCleared = false
-	}
-
 	ss.pickEvalFunction()
+	ss.nnueGeneration = nnue.generation
+
+	return ss.evalMode != previousEvalMode ||
+		(ss.usesNNUE() && ss.nnueGeneration != previousNNUEGeneration)
 }
 
-// interface for eval wrapper
-type EvalFunc func(p *Pos, ply int) int
-
-func (ss *SearchState) evalPesto(p *Pos, ply int) int {
-	return evaluatePesto(p)
+// clearSearchHashes removes scores produced under the previous eval mode.
+// The caller must have exclusive access to all three tables.
+func (ss *SearchState) clearSearchHashes() {
+	ss.tt.clear()
+	evalHashFor(ss).clear()
+	pawnHashFor(ss).clear()
 }
 
-func (ss *SearchState) evalHCE(p *Pos, ply int) int {
-	return evaluateHCE(p)
+// EvalMode selects which evaluation function ss.staticEval() dispatches
+// to for the rest of the current search.
+type EvalMode uint8
+
+const (
+	EvalModePesto EvalMode = iota
+	EvalModeHCE
+	EvalModeNNUE
+	EvalModeHybrid
+)
+
+func (ss *SearchState) usesNNUE() bool {
+	return ss.evalMode == EvalModeNNUE || ss.evalMode == EvalModeHybrid
 }
 
-func (ss *SearchState) evalNNUE(p *Pos, ply int) int {
-	return evaluateNNUE(p, &ss.accStack[ply])
-}
-
-func (ss *SearchState) evalHybrid(p *Pos, ply int) int {
-	return evaluate(p, &ss.accStack[ply])
+// staticEval returns the static evaluation of p at the given ply, using
+// whichever mode pickEvalFunction last selected for this thread.
+func (ss *SearchState) staticEval(p *Pos, ply int) int {
+	switch ss.evalMode {
+	case EvalModePesto:
+		return evaluatePesto(p)
+	case EvalModeHCE:
+		return evaluateHCE(p, ss)
+	case EvalModeNNUE:
+		return evaluateNNUE(p, &ss.accStack[ply], ss)
+	default: // EvalModeHybrid
+		return evaluate(p, &ss.accStack[ply], ss)
+	}
 }
 
 // which eval function we want to use? (PeSTO, HCE, NNUE, hybrid)
@@ -214,7 +241,7 @@ func (ss *SearchState) pickEvalFunction() {
 	// user wants PeSTo eval
 	if pestoEval {
 		ss.isUsingNNUE = false // side effect, needed for speed
-		ss.staticEval = ss.evalPesto
+		ss.evalMode = EvalModePesto
 		return
 	}
 
@@ -222,13 +249,13 @@ func (ss *SearchState) pickEvalFunction() {
 	// NNUE does not understand which corner to target.
 	if ss.kbnModeActive {
 		ss.isUsingNNUE = false
-		ss.staticEval = ss.evalHCE
+		ss.evalMode = EvalModeHCE
 		return
 	}
 
 	// either fallback when NNUE isn't loaded or user wants HCE
 	if !ss.isUsingNNUE && singleOptionValue[HcePerc] == 100 {
-		ss.staticEval = ss.evalHCE
+		ss.evalMode = EvalModeHCE
 		return
 	}
 
@@ -237,12 +264,12 @@ func (ss *SearchState) pickEvalFunction() {
 		singleOptionValue[LikesClosed] == 0 &&
 		singleOptionValue[KingTropism] == 0 &&
 		singleOptionValue[Forwardness] == 0 {
-		ss.staticEval = ss.evalNNUE
+		ss.evalMode = EvalModeNNUE
 		return
 	}
 
 	// hybrid eval
-	ss.staticEval = ss.evalHybrid
+	ss.evalMode = EvalModeHybrid
 }
 
 // doMove makes a move, stores all undo and NNUE update data,
@@ -261,7 +288,10 @@ func (ss *SearchState) undoMove(p *Pos, ply int) {
 	unmakeMove(p, &ss.updateStack[ply], &ss.revertStack[ply])
 }
 
-// wrapper for preparing accumulator while hiding stack from search
+// prepareChildAccumulator copies the current accumulator to the next ply.
+// Used only for null moves, which change no NNUE feature and so have
+// nothing for applyPendingChanges to fuse the copy into -- ply+1 simply
+// needs an exact copy of ply's accumulator.
 func (ss *SearchState) prepareChildAccumulator(ply int) *Accumulator {
 	if !ss.isUsingNNUE {
 		return nil
@@ -271,6 +301,17 @@ func (ss *SearchState) prepareChildAccumulator(ply int) *Accumulator {
 	child.copyFrom(&ss.accStack[ply])
 
 	return child
+}
+
+// nextPlyAccumulator returns the next ply's accumulator slot without
+// copying into it. Used for real moves, where applyPendingChanges reads
+// ply's accumulator as its src and writes ply+1 as dst in one fused pass
+// (see nnueMove3 and friends) instead of copying first.
+func (ss *SearchState) nextPlyAccumulator(ply int) *Accumulator {
+	if !ss.isUsingNNUE {
+		return nil
+	}
+	return &ss.accStack[ply+1]
 }
 
 // record data needed for continuation history calculations

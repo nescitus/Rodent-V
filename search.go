@@ -400,8 +400,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			// We are about to recurse. Prepare NNUE accumulator for the next ply
 			// and update it, since we know a move is legal.
 			if ss.isUsingNNUE {
-				childAcc := ss.prepareChildAccumulator(ply)
-				childAcc.applyPendingChanges(p, u, ss)
+				childAcc := ss.nextPlyAccumulator(ply)
+				childAcc.applyPendingChanges(&ss.accStack[ply], p, u, ss)
 			}
 
 			score = -ss.quiesce(p, ply+1, -probcutBeta, -probcutBeta+1, probcutPv[:])
@@ -608,8 +608,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// that move is legal and hasn't been pruned.
 
 		if ss.isUsingNNUE {
-			childAcc := ss.prepareChildAccumulator(ply)
-			childAcc.applyPendingChanges(p, u, ss)
+			childAcc := ss.nextPlyAccumulator(ply)
+			childAcc.applyPendingChanges(&ss.accStack[ply], p, u, ss)
 		}
 
 		// Count quiet moves
@@ -966,8 +966,8 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 		// We are about to recurse. Prepare NNUE accumulator
 		// for the next ply and update it since we know move is legal
 		if ss.isUsingNNUE {
-			childAcc := ss.prepareChildAccumulator(ply)
-			childAcc.applyPendingChanges(p, u, ss)
+			childAcc := ss.nextPlyAccumulator(ply)
+			childAcc.applyPendingChanges(&ss.accStack[ply], p, u, ss)
 		}
 
 		score := -ss.quiesce(p, ply+1, -beta, -alpha, childPv[:])

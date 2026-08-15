@@ -108,6 +108,82 @@ func castleScalar(
 	}
 }
 
+// ---- three-operand (dst = src + delta) variants ----
+//
+// Scalar counterparts to the AVX2 *_3op assembly (currently written only
+// for NNUEHiddenSize==512): dst = src + delta in one pass instead of a
+// separate copy followed by dst += delta. dst may alias src.
+
+func moveScalar3(
+	dst0, src0, dst1, src1 *int16,
+	wFrom0, wTo0 *int16,
+	wFrom1, wTo1 *int16,
+) {
+	d0 := unsafe.Slice(dst0, NNUEHiddenSize)
+	s0 := unsafe.Slice(src0, NNUEHiddenSize)
+	d1 := unsafe.Slice(dst1, NNUEHiddenSize)
+	s1 := unsafe.Slice(src1, NNUEHiddenSize)
+
+	from0 := unsafe.Slice(wFrom0, NNUEHiddenSize)
+	to0 := unsafe.Slice(wTo0, NNUEHiddenSize)
+	from1 := unsafe.Slice(wFrom1, NNUEHiddenSize)
+	to1 := unsafe.Slice(wTo1, NNUEHiddenSize)
+
+	for i := 0; i < NNUEHiddenSize; i++ {
+		d0[i] = s0[i] + to0[i] - from0[i]
+		d1[i] = s1[i] + to1[i] - from1[i]
+	}
+}
+
+func captureScalar3(
+	dst0, src0, dst1, src1 *int16,
+	wTo0, wFrom0, wCap0 *int16,
+	wTo1, wFrom1, wCap1 *int16,
+) {
+	d0 := unsafe.Slice(dst0, NNUEHiddenSize)
+	s0 := unsafe.Slice(src0, NNUEHiddenSize)
+	d1 := unsafe.Slice(dst1, NNUEHiddenSize)
+	s1 := unsafe.Slice(src1, NNUEHiddenSize)
+
+	to0 := unsafe.Slice(wTo0, NNUEHiddenSize)
+	from0 := unsafe.Slice(wFrom0, NNUEHiddenSize)
+	cap0 := unsafe.Slice(wCap0, NNUEHiddenSize)
+	to1 := unsafe.Slice(wTo1, NNUEHiddenSize)
+	from1 := unsafe.Slice(wFrom1, NNUEHiddenSize)
+	cap1 := unsafe.Slice(wCap1, NNUEHiddenSize)
+
+	for i := 0; i < NNUEHiddenSize; i++ {
+		d0[i] = s0[i] + to0[i] - from0[i] - cap0[i]
+		d1[i] = s1[i] + to1[i] - from1[i] - cap1[i]
+	}
+}
+
+func castleScalar3(
+	dst0, src0, dst1, src1 *int16,
+	wKFrom0, wKTo0, wRFrom0, wRTo0 *int16,
+	wKFrom1, wKTo1, wRFrom1, wRTo1 *int16,
+) {
+	d0 := unsafe.Slice(dst0, NNUEHiddenSize)
+	s0 := unsafe.Slice(src0, NNUEHiddenSize)
+	d1 := unsafe.Slice(dst1, NNUEHiddenSize)
+	s1 := unsafe.Slice(src1, NNUEHiddenSize)
+
+	kFrom0 := unsafe.Slice(wKFrom0, NNUEHiddenSize)
+	kTo0 := unsafe.Slice(wKTo0, NNUEHiddenSize)
+	rFrom0 := unsafe.Slice(wRFrom0, NNUEHiddenSize)
+	rTo0 := unsafe.Slice(wRTo0, NNUEHiddenSize)
+
+	kFrom1 := unsafe.Slice(wKFrom1, NNUEHiddenSize)
+	kTo1 := unsafe.Slice(wKTo1, NNUEHiddenSize)
+	rFrom1 := unsafe.Slice(wRFrom1, NNUEHiddenSize)
+	rTo1 := unsafe.Slice(wRTo1, NNUEHiddenSize)
+
+	for i := 0; i < NNUEHiddenSize; i++ {
+		d0[i] = s0[i] + kTo0[i] - kFrom0[i] + rTo0[i] - rFrom0[i]
+		d1[i] = s1[i] + kTo1[i] - kFrom1[i] + rTo1[i] - rFrom1[i]
+	}
+}
+
 func evalScalar(
 	a0, a1 *int16,
 	w0, w1 *int16,
