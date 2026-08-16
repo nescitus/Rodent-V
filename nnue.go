@@ -39,16 +39,36 @@ var embeddedNet []byte
 // NNUE size and scale. AVX2 code supports following net sizes:
 // 64, 128, 256, 384, 512, 768
 const (
-	NNUEInputSize  = 768
-	NNUEHiddenSize = 512
-	OutputBuckets  = 8
-	NNUEL0Scale    = 255
-	NNUEL1Scale    = 64
+	NNUEInputBuckets   = 4
+	NNUEInputSize      = 768
+	TotalInputFeatures = NNUEInputBuckets * NNUEInputSize // 3072 features
+	NNUEHiddenSize     = 512
+	OutputBuckets      = 8
+	NNUEL0Scale        = 255
+	NNUEL1Scale        = 64
 
-	// Minimum parameter byte sizes for 1-bucket and 8-bucket network blobs (2 bytes per int16)
-	SingleBucketNetSize = (NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + 2*NNUEHiddenSize + 1) * 2
-	OutputBucketNetSize = (NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + OutputBuckets*2*NNUEHiddenSize + OutputBuckets) * 2
+	// Minimum parameter byte sizes for 1-bucket and 4-bucket network blobs (2 bytes per int16)
+	SingleBucketNetSize     = (NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + 2*NNUEHiddenSize + 1) * 2
+	OutputBucketNetSize     = (NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + OutputBuckets*2*NNUEHiddenSize + OutputBuckets) * 2
+	FourBucketSingleNetSize = (TotalInputFeatures*NNUEHiddenSize + NNUEHiddenSize + 2*NNUEHiddenSize + 1) * 2
+	FourBucketOutputNetSize = (TotalInputFeatures*NNUEHiddenSize + NNUEHiddenSize + OutputBuckets*2*NNUEHiddenSize + OutputBuckets) * 2
 )
+
+// 4 King Input Buckets Layout
+// Bucket 0: Central King on Rank 1 (c1, d1, e1, f1)
+// Bucket 1: Castled / Flank King on Rank 1 (a1, b1, g1, h1)
+// Bucket 2: 2nd Rank King (a2..h2)
+// Bucket 3: Upper Ranks (Ranks 3..8)
+var kingBucketTable = [64]int{
+	1, 1, 0, 0, 0, 0, 1, 1, // Rank 1: a1..h1 (0..7)
+	2, 2, 2, 2, 2, 2, 2, 2, // Rank 2: a2..h2 (8..15)
+	3, 3, 3, 3, 3, 3, 3, 3, // Rank 3: a3..h3 (16..23)
+	3, 3, 3, 3, 3, 3, 3, 3, // Rank 4: a4..h4 (24..31)
+	3, 3, 3, 3, 3, 3, 3, 3, // Rank 5: a5..h5 (32..39)
+	3, 3, 3, 3, 3, 3, 3, 3, // Rank 6: a6..h6 (40..47)
+	3, 3, 3, 3, 3, 3, 3, 3, // Rank 7: a7..h7 (48..55)
+	3, 3, 3, 3, 3, 3, 3, 3, // Rank 8: a8..h8 (56..63)
+}
 
 // Types of NNUE updates
 type AccUpdateKind int
@@ -65,7 +85,7 @@ const (
 
 // Params for NNUE evaluation
 type NNUEParameters struct {
-	InputWeights  [NNUEInputSize][NNUEHiddenSize]int16
+	InputWeights  [TotalInputFeatures][NNUEHiddenSize]int16
 	InputBiases   [NNUEHiddenSize]int16
 	OutputWeights [OutputBuckets][2][NNUEHiddenSize]int16
 	OutputBiases  [OutputBuckets]int16
@@ -333,15 +353,18 @@ var zeroWeights [NNUEHiddenSize]int16
 
 func featureIndex(color, pt, sq, kingSq, perspective int) int {
 	idxSq := sq
+	kSq := kingSq
 	if perspective == 1 {
 		idxSq ^= 56
+		kSq ^= 56
 	}
 	if singleOptionValue[HorizontalMirroring] == 1 {
 		if kingSq%8 > 3 {
 			idxSq ^= 7
 		}
 	}
-	return (color^perspective)*384 + pt*64 + idxSq
+	bucket := kingBucketTable[kSq]
+	return bucket*NNUEInputSize + (color^perspective)*384 + pt*64 + idxSq
 }
 
 // Clear = empty-board state = biases only.
@@ -590,11 +613,23 @@ func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update,
 	refresh0 := false
 	refresh1 := false
 
-	if singleOptionValue[HorizontalMirroring] == 1 && u.movingType == K {
+	if u.movingType == K {
 		if u.color == White {
-			refresh0 = (u.from%8 > 3) != (u.to%8 > 3)
+			fromBucket := kingBucketTable[u.from]
+			toBucket := kingBucketTable[u.to]
+			fromMirror := (u.from%8 > 3)
+			toMirror := (u.to%8 > 3)
+			if fromBucket != toBucket || (singleOptionValue[HorizontalMirroring] == 1 && fromMirror != toMirror) {
+				refresh0 = true
+			}
 		} else {
-			refresh1 = (u.from%8 > 3) != (u.to%8 > 3)
+			fromBucket := kingBucketTable[u.from^56]
+			toBucket := kingBucketTable[u.to^56]
+			fromMirror := (u.from%8 > 3)
+			toMirror := (u.to%8 > 3)
+			if fromBucket != toBucket || (singleOptionValue[HorizontalMirroring] == 1 && fromMirror != toMirror) {
+				refresh1 = true
+			}
 		}
 	}
 
@@ -643,8 +678,13 @@ func (ss *SearchState) refreshPerspectiveWithFinny(p *Pos, acc *Accumulator, per
 	if singleOptionValue[HorizontalMirroring] == 1 && kSq%8 > 3 {
 		mirror = 1
 	}
+	kOri := kSq
+	if perspective == 1 {
+		kOri ^= 56
+	}
+	bucket := kingBucketTable[kOri]
 
-	entry := &ss.finny[perspective][mirror]
+	entry := &ss.finny[perspective][mirror][bucket]
 
 	if !entry.valid || entry.generation != nnue.generation {
 		// Initialize accumulator from biases
@@ -813,9 +853,25 @@ func nnueLoadFromBytes(data []byte) bool {
 		return value
 	}
 
-	for input := 0; input < NNUEInputSize; input++ {
-		for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
-			nextParams.InputWeights[input][neuron] = readI16()
+	is4Bucket := len(data) >= FourBucketSingleNetSize
+
+	if is4Bucket {
+		for input := 0; input < TotalInputFeatures; input++ {
+			for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
+				nextParams.InputWeights[input][neuron] = readI16()
+			}
+		}
+	} else {
+		// 1 Input Bucket - read first bucket and duplicate across all 4 buckets
+		for input := 0; input < NNUEInputSize; input++ {
+			for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
+				nextParams.InputWeights[input][neuron] = readI16()
+			}
+		}
+		for b := 1; b < NNUEInputBuckets; b++ {
+			for input := 0; input < NNUEInputSize; input++ {
+				nextParams.InputWeights[b*NNUEInputSize+input] = nextParams.InputWeights[input]
+			}
 		}
 	}
 
@@ -824,7 +880,9 @@ func nnueLoadFromBytes(data []byte) bool {
 	}
 
 	// 8 Output Buckets vs Single Output Bucket
-	if len(data) >= OutputBucketNetSize {
+	isOutputBuckets := (is4Bucket && len(data) >= FourBucketOutputNetSize) || (!is4Bucket && len(data) >= OutputBucketNetSize)
+
+	if isOutputBuckets {
 		for b := 0; b < OutputBuckets; b++ {
 			for neuron := 0; neuron < NNUEHiddenSize; neuron++ {
 				nextParams.OutputWeights[b][0][neuron] = readI16()

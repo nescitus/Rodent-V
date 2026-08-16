@@ -332,7 +332,7 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, vb *ViriBuffer, nodesPerMove in
 
 	// New game: clear TT entries and reset Finny cache
 	ss.tt.clear()
-	ss.finny = [2][2]FinnyEntry{}
+	ss.finny = [2][2][NNUEInputBuckets]FinnyEntry{}
 	refresh(&p, &ss.accStack[0])
 
 	vb.Reset()
