@@ -18,6 +18,118 @@ type dgEntry struct {
 
 var datagenMode bool = false
 
+// Scharnagl N5n table for knight placement in Chess960
+var n5n = [10][2]int{
+	{0, 0}, {0, 1}, {0, 2}, {0, 3},
+	{1, 1}, {1, 2}, {1, 3},
+	{2, 2}, {2, 3},
+	{3, 3},
+}
+
+// frcBackrank generates the 8-piece backrank for a Chess960 index n (0..959).
+// Index 518 produces standard chess: RNBQKBNR.
+func frcBackrank(n int) [8]byte {
+	n2 := n / 4
+	b1 := n % 4
+
+	n3 := n2 / 4
+	b2 := n2 % 4
+
+	n4 := n3 / 6
+	q := n3 % 6
+
+	var rank [8]byte
+	rank[b1*2+1] = 'B'
+	rank[b2*2] = 'B'
+
+	empty := 0
+	for i := 0; i < 8; i++ {
+		if rank[i] == 0 {
+			if empty == q {
+				rank[i] = 'Q'
+			}
+			empty++
+		}
+	}
+
+	knight1 := n5n[n4][0]
+	knight2 := n5n[n4][1]
+
+	empty = 0
+	for i := 0; i < 8; i++ {
+		if rank[i] == 0 {
+			if empty == knight1 {
+				rank[i] = 'N'
+			}
+			empty++
+		}
+	}
+
+	empty = 0
+	for i := 0; i < 8; i++ {
+		if rank[i] == 0 {
+			if empty == knight2 {
+				rank[i] = 'N'
+			}
+			empty++
+		}
+	}
+
+	first := true
+	for i := 0; i < 8; i++ {
+		if rank[i] == 0 {
+			if first {
+				rank[i] = 'R'
+				first = false
+			} else {
+				rank[i] = 'K'
+				for j := i + 1; j < 8; j++ {
+					if rank[j] == 0 {
+						rank[j] = 'R'
+						break
+					}
+				}
+				break
+			}
+		}
+	}
+	return rank
+}
+
+// generateDFRCFEN creates a random Double Fischer Random Chess (DFRC) starting position.
+// There are 960 x 960 = 921,600 unique DFRC combinations.
+func generateDFRCFEN(rng *rand.Rand) string {
+	whiteRank := frcBackrank(rng.Intn(960))
+	blackRank := frcBackrank(rng.Intn(960))
+
+	var fen [64]byte
+	idx := 0
+
+	// Black backrank (lowercase)
+	for i := 0; i < 8; i++ {
+		c := blackRank[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		fen[idx] = c
+		idx++
+	}
+
+	copy(fen[idx:], "/pppppppp/8/8/8/8/PPPPPPPP/")
+	idx += len("/pppppppp/8/8/8/8/PPPPPPPP/")
+
+	// White backrank (uppercase)
+	for i := 0; i < 8; i++ {
+		fen[idx] = whiteRank[i]
+		idx++
+	}
+
+	copy(fen[idx:], " w KQkq - 0 1")
+	idx += len(" w KQkq - 0 1")
+
+	return string(fen[:idx])
+}
+
 // bookIndex holds the raw book file in a single contiguous byte buffer
 // and an index of [start, end] byte offsets for each non-empty trimmed line.
 // This avoids allocating millions of individual string objects (and their
@@ -84,11 +196,13 @@ func runDatagen(targetPositions, threads, nodesPerMove int, bookFile string) {
 	if bookFile != "" {
 		b, err := loadBookIndex(bookFile)
 		if err != nil {
-			fmt.Printf("Warning: could not open book file %s, using startpos\n", bookFile)
+			fmt.Printf("Warning: could not open book file %s, using pure DFRC\n", bookFile)
 		} else {
 			book = b
 			fmt.Printf("Loaded %d positions from book %s (compact buffer)\n", book.numLines(), bookFile)
 		}
+	} else {
+		fmt.Println("Using pure DFRC (Double Fischer Random Chess, 921,600 opening combinations)")
 	}
 
 	baseTimestamp := time.Now().UnixNano()
@@ -175,8 +289,13 @@ func dgPlayGame(rng *rand.Rand, ss *SearchState, vb *ViriBuffer, nodesPerMove in
 		parseFEN(&p, fen)
 		numRandom = rng.Intn(10) // 0 to 9 random moves from book pos
 	} else {
-		parseFEN(&p, startFEN)
-		numRandom = 8 + rng.Intn(3) // 8 to 10 random moves from start pos
+		// Pure DFRC mode: 50% standard startpos, 50% random DFRC (921,600 positions)
+		if rng.Intn(2) == 0 {
+			parseFEN(&p, startFEN)
+		} else {
+			parseFEN(&p, generateDFRCFEN(rng))
+		}
+		numRandom = 8 + rng.Intn(3) // 8 to 10 random moves
 	}
 
 	for i := 0; i < numRandom; i++ {
