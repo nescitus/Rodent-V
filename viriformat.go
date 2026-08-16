@@ -95,19 +95,6 @@ func (vb *ViriBuffer) WriteMoveEval(move int, eval int) {
 		vType = 1
 	} else if mType == CASTLE {
 		vType = 2
-		if fr < 32 { // White
-			if to > fr {
-				to = H1
-			} else {
-				to = A1
-			}
-		} else { // Black
-			if to > fr {
-				to = H8
-			} else {
-				to = A8
-			}
-		}
 	} else if mType >= N_PROM {
 		vType = 3
 		vPromo = uint16(mType - N_PROM)
