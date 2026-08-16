@@ -100,7 +100,7 @@ func main() {
 			target, _ := strconv.Atoi(os.Args[2])
 			threads, _ := strconv.Atoi(os.Args[3])
 			nodesPerMove, _ := strconv.Atoi(os.Args[4])
-			bookFile := "UHO_Lichess_4852_v1.epd"
+			bookFile := ""
 			if len(os.Args) > 5 {
 				bookFile = os.Args[5]
 			}
