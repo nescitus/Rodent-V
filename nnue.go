@@ -614,10 +614,10 @@ func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update,
 	refresh0 := false
 	refresh1 := false
 
-	// When we use horizontal mirroring, king move from the kingside
-	// to the queenside or another way round requires accumulator
-	// refreshing.
-	if singleOptionValue[HorizontalMirroring] == 1 && u.movingType == K {
+	// King moving to a different king bucket requires accumulator refreshing.
+	// When horizontal mirroring is enabled, moving across the kingside/queenside
+	// center boundary also requires refreshing.
+	if u.movingType == K {
 		if u.color == White {
 			fromBucket := kingBucketTable[u.from]
 			toBucket := kingBucketTable[u.to]
