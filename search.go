@@ -472,8 +472,12 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			}
 		}
 
-		// Does the move give check?
+		// Does the move give check? We detect it before executing a move.
 		givesCheck := moveGivesCheck(p, move)
+
+		// Movegen stage flags to simplify pruning/reduction conditions.
+		quietStage := stage == StageQuiet
+		badCapStage := stage == StageBadCaptures
 
 		// Late move pruning: skip quiet moves beyond the threshold.
 		// Moves that give check are exempt — they may be the only defence
@@ -482,18 +486,12 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// later moves are more likely to be relevant).
 		if depth < 10 { // table size limit
 
-			lmpThreshold := LMPnormalStep
+			lmpThreshold := lmp[0][depth]
 			if improving {
-				lmpThreshold = LMPimprovingStep
+				lmpThreshold = lmp[1][depth]
 			}
-
-			if useLmpTable {
-				lmpThreshold = lmp[0][depth]
-				if improving {
-					lmpThreshold = lmp[1][depth]
-				}
-			}
-			if useLMP && stage == StageQuiet && !isPv && !nodeInCheck && depth < LMPdepth &&
+			
+			if useLMP && quietStage && !isPv && !nodeInCheck && depth < LMPdepth &&
 				quietTried > lmpThreshold && !givesCheck {
 				continue
 			}
@@ -501,7 +499,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// Futility pruning: at shallow depth, skip late quiet moves that
 		// cannot plausibly raise alpha even with a generous margin.
-		if useFutility && stage == StageQuiet && !isPv && !nodeInCheck && !givesCheck &&
+		if useFutility && quietStage && !isPv && !nodeInCheck && !givesCheck &&
 			ss.excludedMove[ply] == 0 && depth <= fpMaxDepth &&
 			quietTried > 0 && !isMating(alpha) &&
 			staticEval+fpMargin*depth <= alpha {
@@ -551,7 +549,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// --- Quiet SEE Pruning ---
 		// Prune quiet moves that hang material beyond a quadratically scaled margin based on expected LMR depth.
-		if useQuietSEEPruning && stage == StageQuiet && !isPv {
+		if useQuietSEEPruning && quietStage && !isPv {
 			expectedReduction := 0
 			if depth >= minLmrDepth && movesTried >= minLmrMove {
 				expectedReduction = lmr[min(depth, 63)][min(movesTried, 63)]
@@ -574,7 +572,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// --- Main Search Capture Pruning ---
 		// Prune captures and checks in the main search that lose excessive material based on depth.
-		if useMainCaptureSEEPruning && stage != StageQuiet {
+		if useMainCaptureSEEPruning && badCapStage {
 			threshold := -(seeMainMargin * depth)
 			if !see(p, move, threshold) {
 				continue
@@ -619,8 +617,6 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 		// --- Late move reduction ---
 		isReduced := false
-		quietStage := stage == StageQuiet
-		badCapStage := stage == StageBadCaptures
 
 		if useLMR && depth >= minLmrDepth && (quietStage || badCapStage) &&
 			!nodeInCheck && movesTried >= minLmrMove &&
@@ -631,7 +627,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 				// Read base reduction value for quiet moves.
 				reduction = lmr[min(depth, 63)][min(movesTried, 63)]
 				// Not improving: position is trending down, reduce more aggressively.
-				if !improving && LMRnonImproving {
+				if !improving {
 					reduction++
 				}
 				// Moves that give check are reduced half the amount.
@@ -889,12 +885,13 @@ func (ss *SearchState) quiesce(p *Pos, ply, alpha, beta int, pv []int) int {
 				break
 			}
 
+			// Prune captures expected to lose material.
 			if isBadCapture(p, move) {
 				continue
 			}
 
 			// Prune non-queen promotions in QS.
-			if isProm(move) && moveType(move) != Q_PROM {
+			if isNonQueenProm(move) {
 				continue
 			}
 
@@ -1150,6 +1147,11 @@ func (ss *SearchState) isImproving(ply, staticEval int, nodeInCheck bool) bool {
 		return staticEval > ss.evalStack[ply-4]
 	}
 	return true
+}
+
+// Detect non-queen promotions
+func isNonQueenProm(move int) bool {
+	return isProm(move) && moveType(move) != Q_PROM
 }
 
 // Does score show we are delivering checkmate?
