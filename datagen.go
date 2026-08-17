@@ -124,8 +124,29 @@ func generateDFRCFEN(rng *rand.Rand) string {
 		idx++
 	}
 
-	copy(fen[idx:], " w KQkq - 0 1")
-	idx += len(" w KQkq - 0 1")
+	fen[idx] = ' '
+	idx++
+	fen[idx] = 'w'
+	idx++
+	fen[idx] = ' '
+	idx++
+
+	// Castling rights (Shredder FEN format: rook file letters)
+	for i := 0; i < 8; i++ {
+		if whiteRank[i] == 'R' {
+			fen[idx] = byte('A' + i)
+			idx++
+		}
+	}
+	for i := 0; i < 8; i++ {
+		if blackRank[i] == 'R' {
+			fen[idx] = byte('a' + i)
+			idx++
+		}
+	}
+
+	copy(fen[idx:], " - 0 1")
+	idx += len(" - 0 1")
 
 	return string(fen[:idx])
 }
