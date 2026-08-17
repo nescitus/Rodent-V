@@ -208,7 +208,7 @@ func TestFinnyInvalidatesAfterNNUEReload(t *testing.T) {
 	var got Accumulator
 	ss.refreshPerspectiveWithFinny(&p, &got, White)
 	var want Accumulator
-	refreshPerspective(&p, &want, White)
+	ss.refreshPerspective(&p, &want, White)
 
 	if got.values[White] != want.values[White] {
 		t.Fatalf("Finny retained the previous network: got first neuron %d, want %d", got.values[White][0], want.values[White][0])
