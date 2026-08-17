@@ -603,17 +603,21 @@ func (dst *Accumulator) promotionCapture(src *Accumulator, color, from, to, prom
 // nnueMove3/nnueCapture3/nnueCastle3.
 func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update, ss *SearchState) {
 
-	// already applied
+	// Already applied!
 	if !u.dirty {
 		return
 	}
 
+	// Init king-related stuff.
 	k0 := p.kingSq[White]
 	k1 := p.kingSq[Black]
 	refresh0 := false
 	refresh1 := false
 
-	if u.movingType == K {
+	// When we use horizontal mirroring, king move from the kingside
+	// to the queenside or another way round requires accumulator
+	// refreshing.
+	if singleOptionValue[HorizontalMirroring] == 1 && u.movingType == K {
 		if u.color == White {
 			fromBucket := kingBucketTable[u.from]
 			toBucket := kingBucketTable[u.to]
@@ -633,6 +637,7 @@ func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update,
 		}
 	}
 
+	// Apply move.
 	switch u.flag {
 	case uNORMAL, uEP_SET:
 		acc.move(src, u.color, u.movingType, u.from, u.to, k0, k1, refresh0, refresh1)
@@ -654,22 +659,24 @@ func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update,
 
 	}
 
+	// Refresh if king move demands so.
 	if refresh0 {
-		if ss != nil {
-			ss.refreshPerspectiveWithFinny(p, acc, 0)
-		} else {
-			refreshPerspective(p, acc, 0)
-		}
+		ss.refreshPerspective(p, acc, 0)
 	}
 	if refresh1 {
-		if ss != nil {
-			ss.refreshPerspectiveWithFinny(p, acc, 1)
-		} else {
-			refreshPerspective(p, acc, 1)
-		}
+		ss.refreshPerspective(p, acc, 1)
 	}
 
+	// Done!
 	u.dirty = false
+}
+
+func (ss *SearchState) refreshPerspective(p *Pos, acc *Accumulator, perspective int) {
+	if ss != nil {
+		ss.refreshPerspectiveWithFinny(p, acc, perspective)
+	} else {
+		refreshPerspectivePlain(p, acc, perspective)
+	}
 }
 
 func (ss *SearchState) refreshPerspectiveWithFinny(p *Pos, acc *Accumulator, perspective int) {
@@ -746,7 +753,7 @@ func (ss *SearchState) refreshPerspectiveWithFinny(p *Pos, acc *Accumulator, per
 	copy(acc.values[perspective][:NNUEHiddenSize], entry.acc[:NNUEHiddenSize])
 }
 
-func refreshPerspective(p *Pos, acc *Accumulator, perspective int) {
+func refreshPerspectivePlain(p *Pos, acc *Accumulator, perspective int) {
 	kSq := p.kingSq[perspective]
 
 	a := &acc.values[perspective][0]
@@ -757,6 +764,7 @@ func refreshPerspective(p *Pos, acc *Accumulator, perspective int) {
 		nnueParams.InputBiases[:NNUEHiddenSize],
 	)
 
+	// Scan board and add all the pieces
 	for sq := 0; sq < 64; sq++ {
 		piece := p.board[sq]
 		if piece == NO_PC {
@@ -765,7 +773,6 @@ func refreshPerspective(p *Pos, acc *Accumulator, perspective int) {
 
 		color := colorOf(piece)
 		pt := typeOf(piece)
-
 		idx := featureIndex(color, pt, sq, kSq, perspective)
 		w := &nnueParams.InputWeights[idx][0]
 
@@ -921,6 +928,7 @@ func nnueLoadFromBytes(data []byte) bool {
 	return true
 }
 
+// Load embedded NNUE parameters
 func nnueInitEmbedded() bool {
 	return nnueLoadFromBytes(embeddedNet)
 }
