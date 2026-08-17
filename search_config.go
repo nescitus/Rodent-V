@@ -40,16 +40,12 @@ const (
 
 	useLMP           = true
 	LMPdepth         = 9
-	useLmpTable      = true
-	LMPnormalStep    = 4
-	LMPimprovingStep = 6
 
 	useFutility = true // cost of disabling: 20 Elo
 	fpMargin    = 120  // centipawns per depth for main-search move-loop futility pruning
 	fpMaxDepth  = 4    // only prune quiet moves by futility at shallow depth
 
 	useLMR          = true
-	LMRnonImproving = true
 	lmrDivisor      = 2.0
 	lmrLinear       = 1.0
 	lmrMax          = 10
