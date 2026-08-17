@@ -91,8 +91,8 @@ type SearchState struct {
 	minorCorrHist   [2][2][corrHistSize]int16 // knight-bishop-king correction history
 	majorCorrHist   [2][2][corrHistSize]int16 // rook-queen-king correction history
 
-	// ---- NNUE Finny Cache (cached accumulator per perspective & mirror) ----
-	finny [2][2]FinnyEntry // [perspective][mirror]
+	// ---- NNUE Finny Cache (cached accumulator per perspective, mirror & king bucket) ----
+	finny [2][2][NNUEInputBuckets]FinnyEntry // [perspective][mirror][bucket]
 }
 
 type FinnyEntry struct {
@@ -148,7 +148,7 @@ func (ss *SearchState) clearHistory() {
 	ss.nonPawnCorrHist = [2][2][corrHistSize]int16{}
 	ss.majorCorrHist = [2][2][corrHistSize]int16{}
 	ss.minorCorrHist = [2][2][corrHistSize]int16{}
-	ss.finny = [2][2]FinnyEntry{}
+	ss.finny = [2][2][NNUEInputBuckets]FinnyEntry{}
 	for i := range ss.moveBuffers {
 		ss.moveBuffers[i].p = nil
 		ss.moveBuffers[i].ss = nil
