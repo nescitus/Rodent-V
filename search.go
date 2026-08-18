@@ -445,6 +445,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 	initMovePicker(p, picker, ss, ttMove, ply)
 	var childPv [maxPly]int
+	var checkInfo CheckInfo
 
 	// --- Main move loop ---
 	for {
@@ -472,8 +473,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			}
 		}
 
-		// Does the move give check? We detect it before executing a move.
-		givesCheck := moveGivesCheck(p, move)
+		// Does the move give check? We detect it before executing a move using cached CheckInfo.
+		givesCheck := moveGivesCheck(p, move, &checkInfo)
 
 		// Movegen stage flags to simplify pruning/reduction conditions.
 		quietStage := stage == StageQuiet
