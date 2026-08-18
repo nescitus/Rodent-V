@@ -4,6 +4,7 @@ package main
 // Cost of disabling is measured by 1000 game matches at 16 + 0.16
 const (
 	adjustEvalByTT = false
+	useFailFirm    = true
 
 	useRFP       = true
 	rfpMaxDepth  = 7        //

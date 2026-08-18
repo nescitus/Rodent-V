@@ -691,6 +691,12 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// reaching this position, so we can stop searching.
 		if score >= beta {
 
+			// Fail-firm: dampen shallow fail-soft overshoots towards beta
+			// based on depth while keeping deep search scores accurate.
+			if useFailFirm && !isMateScore(score) && !isMateScore(beta) {
+				score = (score*(depth+4) + beta) / (depth + 5)
+			}
+
 			// We want to try moves that may cause a beta cutoff as early
 			// as possible. History move ordering tries to increase chances
 			// of such an occurence.
