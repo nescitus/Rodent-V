@@ -4,7 +4,7 @@
 ; opening book missing
 ;
 setoption name nnuePath value nets/rodent_tal_512hl.bin
-setoption name mainBookPath value books/ph-tal2.bin.bin
+setoption name mainBookPath value books/ph-tal2.bin
 setoption name guideBookPath value books/empty.bin
 setoption name hceWeight value 0
 setoption name nnueWeight value 100
