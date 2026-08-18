@@ -491,7 +491,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			if improving {
 				lmpThreshold = lmp[1][depth]
 			}
-			
+
 			if useLMP && quietStage && !isPv && !nodeInCheck && depth < LMPdepth &&
 				quietTried > lmpThreshold && !givesCheck {
 				continue
@@ -694,6 +694,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 			// Fail-firm: dampen shallow fail-soft overshoots towards beta
 			// based on depth while keeping deep search scores accurate.
+			// (Does not pass yet! but kept for future re-testing)
+			// Reference: Potential
 			if useFailFirm && !isMateScore(score) && !isMateScore(beta) {
 				score = (score*(depth+4) + beta) / (depth + 5)
 			}
