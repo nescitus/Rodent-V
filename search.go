@@ -445,6 +445,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 	initMovePicker(p, picker, ss, ttMove, ply)
 	var childPv [maxPly]int
+	var checkInfo CheckInfo
 
 	// --- Main move loop ---
 	for {
@@ -472,8 +473,8 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			}
 		}
 
-		// Does the move give check? We detect it before executing a move.
-		givesCheck := moveGivesCheck(p, move)
+		// Does the move give check? We detect it before executing a move using cached CheckInfo.
+		givesCheck := moveGivesCheck(p, move, &checkInfo)
 
 		// Movegen stage flags to simplify pruning/reduction conditions.
 		quietStage := stage == StageQuiet
@@ -490,7 +491,7 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 			if improving {
 				lmpThreshold = lmp[1][depth]
 			}
-			
+
 			if useLMP && quietStage && !isPv && !nodeInCheck && depth < LMPdepth &&
 				quietTried > lmpThreshold && !givesCheck {
 				continue
@@ -690,6 +691,14 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 		// Beta cutoff: this move is "too good"; the opponent won't allow
 		// reaching this position, so we can stop searching.
 		if score >= beta {
+
+			// Fail-firm: dampen shallow fail-soft overshoots towards beta
+			// based on depth while keeping deep search scores accurate.
+			// (Does not pass yet! but kept for future re-testing)
+			// Reference: Potential
+			if useFailFirm && !isMateScore(score) && !isMateScore(beta) {
+				score = (score*(depth+4) + beta) / (depth + 5)
+			}
 
 			// We want to try moves that may cause a beta cutoff as early
 			// as possible. History move ordering tries to increase chances

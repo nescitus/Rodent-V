@@ -27,6 +27,8 @@
 
 package main
 
+import "math/bits"
+
 // attacksFrom returns a bitboard of squares that the piece on sq
 // can move to (ignoring legality; the caller filters illegal moves).
 // Sliding piece attacks account for the current occupancy.
@@ -74,97 +76,71 @@ func isAttacked(p *Pos, sq, side int) bool {
 		(p.pieceBB(side, K)&kingAtk[sq] != 0)
 }
 
-// Detect whether a move gives check
-// without making it on the board
-func moveGivesCheck(p *Pos, move int) bool {
-	var checks uint64
+// CheckInfo caches target check squares and discovered check candidates
+// for the current node, avoiding repeated magic bitboard attack lookups across candidate moves.
+type CheckInfo struct {
+	checkMask    [6]uint64
+	dcCandidates uint64
+	kingSq       int
+	valid        bool
+}
 
+func (ci *CheckInfo) init(p *Pos) {
 	side := p.side
+	enemyKing := p.kingSq[opp(side)]
+	ci.kingSq = enemyKing
+	occ := p.occupied()
+
+	// 1. Direct check squares for each piece type
+	ci.checkMask[P] = pawnAtk[opp(side)][enemyKing]
+	ci.checkMask[N] = knightAtk[enemyKing]
+	bAtk := bishopAttacks(occ, enemyKing)
+	rAtk := rookAttacks(occ, enemyKing)
+	ci.checkMask[B] = bAtk
+	ci.checkMask[R] = rAtk
+	ci.checkMask[Q] = bAtk | rAtk
+	ci.checkMask[K] = 0
+
+	// 2. Discovered check candidates: friendly pieces on the rays between our sliders and enemy king
+	ci.dcCandidates = 0
+	ourPieces := p.colorBB[side]
+	ourSliders := ourPieces & (p.typeBB[B] | p.typeBB[R] | p.typeBB[Q])
+
+	if ourSliders != 0 {
+		// Diagonal pinners/sliders towards enemy king
+		diagSliders := (p.typeBB[B] | p.typeBB[Q]) & ourSliders & bishopAttacks(ourPieces, enemyKing)
+		for diagSliders != 0 {
+			sq := lsb(diagSliders)
+			diagSliders &= diagSliders - 1
+			between := BetweenBB[enemyKing][sq] & occ
+			if bits.OnesCount64(between) == 1 && (between&ourPieces) != 0 {
+				ci.dcCandidates |= between
+			}
+		}
+
+		// Orthogonal pinners/sliders towards enemy king
+		orthoSliders := (p.typeBB[R] | p.typeBB[Q]) & ourSliders & rookAttacks(ourPieces, enemyKing)
+		for orthoSliders != 0 {
+			sq := lsb(orthoSliders)
+			orthoSliders &= orthoSliders - 1
+			between := BetweenBB[enemyKing][sq] & occ
+			if bits.OnesCount64(between) == 1 && (between&ourPieces) != 0 {
+				ci.dcCandidates |= between
+			}
+		}
+	}
+
+	ci.valid = true
+}
+
+// Detect whether a move gives check without making it on the board.
+// Uses precomputed CheckInfo to evaluate candidate moves with minimal O(1) bitwise operations.
+func moveGivesCheck(p *Pos, move int, ci *CheckInfo) bool {
 	from := moveFrom(move)
 	to := moveTo(move)
-	fromType := p.typeAt(from) // moving piece
-	toType := p.typeAt(to)     // captured piece, if any
 	typeOfMove := moveType(move)
 
-	// What piece is placed on the destination square?
-	placedPiece := fromType
-	if isProm(move) {
-		placedPiece = promType(move)
-	}
-
-	// Locate enemy king
-	kingSquare := p.kingSq[opp(side)]
-
-	// Direct checks by a pawn
-	if placedPiece == P {
-		checks = shiftForward(shiftSides(squareBit(kingSquare)), opp(side))
-		if checks&squareBit(to) != 0 {
-			return true
-		}
-	}
-
-	// Direct checks by a knight
-	if placedPiece == N {
-		checks = knightAtk[to]
-		if checks&squareBit(kingSquare) != 0 {
-			return true
-		}
-	}
-
-	// Prepare occupancy after the move.
-	// Remove moving piece from origin...
-	occAfter := p.occupied() ^ squareBit(from)
-
-	// ...place moving piece on destination.
-	occAfter |= squareBit(to)
-
-	// En passant: captured pawn is not on `to`, remove it explicitly.
-	if typeOfMove == EP_CAP {
-		dir := -8
-		if side == Black {
-			dir = 8
-		}
-		occAfter ^= squareBit(to + dir)
-	}
-
-	// For direct slider checks from the moved piece, remove that piece
-	// itself from occupancy when generating attacks from `to`.
-	occForMovedPiece := occAfter ^ squareBit(to)
-
-	// Direct diagonal checks
-	if placedPiece == B || placedPiece == Q {
-		checks = bishopAttacks(occForMovedPiece, to)
-		if checks&squareBit(kingSquare) != 0 {
-			return true
-		}
-	}
-
-	// Direct orthogonal checks
-	if placedPiece == R || placedPiece == Q {
-		checks = rookAttacks(occForMovedPiece, to)
-		if checks&squareBit(kingSquare) != 0 {
-			return true
-		}
-	}
-
-	// Discovered checks use occupancy after the move.
-	occ := occAfter
-
-	// Diagonal discovered checks
-	checks = bishopAttacks(occ, kingSquare)
-	if checks&(p.pieceBB(side, B)|p.pieceBB(side, Q)) != 0 {
-		return true
-	}
-
-	// Orthogonal discovered checks
-	checks = rookAttacks(occ, kingSquare)
-	if checks&(p.pieceBB(side, R)|p.pieceBB(side, Q)) != 0 {
-		return true
-	}
-
-	// Horizontal checks discovered by castling
-	// (we make and unmake a move, as it's rare enough
-	// and writing out correct conditions would be hard)
+	// Castling is rare and involves moving both King and Rook
 	if typeOfMove == CASTLE {
 		var u Update
 		var r Revert
@@ -173,9 +149,49 @@ func moveGivesCheck(p *Pos, move int) bool {
 		return child.inCheck()
 	}
 
-	// toType is intentionally kept, even though it is no longer needed in
-	// this version, because it can be useful for debugging / future tweaks.
-	_ = toType
+	if ci == nil {
+		var localCi CheckInfo
+		localCi.init(p)
+		ci = &localCi
+	} else if !ci.valid {
+		ci.init(p)
+	}
+
+	placedPiece := p.typeAt(from)
+	if isProm(move) {
+		placedPiece = promType(move)
+	}
+
+	// 1. Direct check
+	if ci.checkMask[placedPiece]&squareBit(to) != 0 {
+		return true
+	}
+
+	// 2. Discovered check
+	if ci.dcCandidates&squareBit(from) != 0 {
+		// If the piece does not stay on the same line to the king, it discovered check
+		if LineBB[from][ci.kingSq]&squareBit(to) == 0 {
+			return true
+		}
+	}
+
+	// 3. En-passant capture (removes enemy pawn off a different square)
+	if typeOfMove == EP_CAP {
+		side := p.side
+		kingSquare := p.kingSq[opp(side)]
+		occAfter := p.occupied() ^ squareBit(from) ^ squareBit(to)
+		dir := -8
+		if side == Black {
+			dir = 8
+		}
+		occAfter ^= squareBit(to + dir)
+
+		if (bishopAttacks(occAfter, kingSquare)&(p.pieceBB(side, B)|p.pieceBB(side, Q))) != 0 ||
+			(rookAttacks(occAfter, kingSquare)&(p.pieceBB(side, R)|p.pieceBB(side, Q))) != 0 {
+			return true
+		}
+	}
 
 	return false
 }
+

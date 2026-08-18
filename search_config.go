@@ -4,6 +4,7 @@ package main
 // Cost of disabling is measured by 1000 game matches at 16 + 0.16
 const (
 	adjustEvalByTT = false
+	useFailFirm    = false
 
 	useRFP       = true
 	rfpMaxDepth  = 7        //
@@ -38,20 +39,20 @@ const (
 	seBetaMargin   = 6  // centipawns per ply subtracted from ttScore for singular verification
 	seDoubleMargin = 64 // extra centipawns below singular beta needed for a double extension
 
-	useLMP           = true
-	LMPdepth         = 9
+	useLMP   = true
+	LMPdepth = 9
 
 	useFutility = true // cost of disabling: 20 Elo
 	fpMargin    = 120  // centipawns per depth for main-search move-loop futility pruning
 	fpMaxDepth  = 4    // only prune quiet moves by futility at shallow depth
 
-	useLMR          = true
-	lmrDivisor      = 2.0
-	lmrLinear       = 1.0
-	lmrMax          = 10
-	minLmrDepth     = 3
-	minLmrMove      = 4
-	cutNodeLmr      = 1
+	useLMR      = true
+	lmrDivisor  = 2.0
+	lmrLinear   = 1.0
+	lmrMax      = 10
+	minLmrDepth = 3
+	minLmrMove  = 4
+	cutNodeLmr  = 1
 
 	// Quiet SEE Pruning
 	useQuietSEEPruning  = false
