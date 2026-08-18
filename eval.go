@@ -557,6 +557,18 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 			e.mgScore[side][EvalPawns] += pawnAdjust[e.center[side]][side][sq]
 		}
 
+		// Pawn pairs
+		if (usePawnPairs) {
+        	second := p.pieceBB(side, P)
+        	for second != 0 {
+				companion := lsb(second)
+            	if (companion > sq) {
+               		add(e, side, EvalPawns,pawnPairMg[side][sq][companion],pawnPairEg[side][sq][companion]);
+            	}
+				second &= second - 1
+        	}
+		}
+
 		// Pawn phalanx: two pawns standing side by side.
 		if shiftSides(b)&p.pieceBB(side, P) > 0 {
 			addPhalanx(e, side, sq)
@@ -586,25 +598,27 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 		// the doubled pawn blocks the most pawn breaks) are hurt the most in MG,
 		// while edge files are punished more in EG (they can rarely promote).
 
-		pushSq := sq + 8
-		if side == Black {
-			pushSq = sq - 8
-		}
-
-		if pushSq >= 0 && pushSq < 64 && p.pieceBB(side, P)&squareBit(pushSq) != 0 {
-			// Only penalise if the doubled pawn has no immediate captures.
-			//if pawnAtk[side][sq]&p.pieceBB(opp(side), P) == 0 {
-			fileIdx := fileOf(sq)
-			if fileIdx > 3 {
-				fileIdx = 7 - fileIdx
+		if (!usePawnPairs) {
+			pushSq := sq + 8
+			if side == Black {
+				pushSq = sq - 8
 			}
-			add(e, side, EvalPawns, doubledPawnMG[fileIdx], doubledPawnEG[fileIdx])
-			//}
+
+			if pushSq >= 0 && pushSq < 64 && p.pieceBB(side, P)&squareBit(pushSq) != 0 {
+				//Only penalise if the doubled pawn has no immediate captures.
+				//if pawnAtk[side][sq]&p.pieceBB(opp(side), P) == 0 {
+				fileIdx := fileOf(sq)
+				if fileIdx > 3 {
+					fileIdx = 7 - fileIdx
+				}
+				add(e, side, EvalPawns, doubledPawnMG[fileIdx], doubledPawnEG[fileIdx])
+			}
 		}
 
 		pieces &= pieces - 1
 	}
 }
+
 
 // evaluatePassers scores the passed pawns for one side.
 //

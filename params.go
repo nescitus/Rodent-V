@@ -1,5 +1,7 @@
 package main
 
+var usePawnPairs bool
+
 // --- Eval params ---
 var pieceValMG = [7]int{88, 336, 344, 461, 938, 0, 0}
 var pieceValEG = [7]int{135, 447, 463, 787, 1534, 0, 0}
@@ -353,9 +355,6 @@ var KidHighP = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
 }
 
-// 63.85416919518022
-// 63.83556431475765
-
 var KidLowP = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	-1, 0, -1, 0, 0, -4, -3, -2,
@@ -597,6 +596,8 @@ var phalanxEgByColor [2][64]int
 var pawnAdjust [Undefined][2][64]int
 var knightAdjust [Undefined][2][64]int
 var bishopAdjust [Undefined][2][64]int
+var pawnPairMg[2][64][64] int
+var pawnPairEg[2][64][64] int
 
 // Init
 
@@ -610,6 +611,147 @@ func init() {
 			pstEGByColor[Black][piece][sq^56] = pstEG[piece][sq]
 		}
 	}
+	usePawnPairs = false //
+
+	// 56.378785953357436
+	// 56.321991399224174
+	
+	// touching doubled pawns
+	addPawnRelation(A2, A3, -18, -28)
+	addPawnRelation(A3, A4, -18, -28)
+	addPawnRelation(A4, A5, -18, -28)
+	addPawnRelation(A5, A6, -18, -28)
+	addPawnRelation(A6, A7, -18, -28)
+
+	addPawnRelation(H2, H3, -18, -28)
+	addPawnRelation(H3, H4, -18, -28)
+	addPawnRelation(H4, H5, -18, -28)
+	addPawnRelation(H5, H6, -18, -28)
+	addPawnRelation(H6, H7, -18, -28)
+
+	addPawnRelation(B2, B3,  1, -14)
+	addPawnRelation(B3, B4,  1, -14)
+	addPawnRelation(B4, B5,  1, -14)
+	addPawnRelation(B5, B6,  1, -14)
+	addPawnRelation(B6, B7,  1, -14)
+
+	addPawnRelation(G2, G3,  1, -14)
+	addPawnRelation(G3, G4,  1, -14)
+	addPawnRelation(G4, G5,  1, -14)
+	addPawnRelation(G5, G6,  1, -14)
+	addPawnRelation(G6, G7,  1, -14)
+
+	addPawnRelation(C2, C3,  -10, -16)
+	addPawnRelation(C3, C4,  -11, -16)
+	addPawnRelation(C4, C5,  -10, -16)
+	addPawnRelation(C5, C6,  -10, -16)
+	addPawnRelation(C6, C7,  -10, -16)
+
+	addPawnRelation(F2, F3,  -10, -16)
+	addPawnRelation(F3, F4,  -10, -16)
+	addPawnRelation(F4, F5,  -10, -16)
+	addPawnRelation(F5, F6,  -10, -16)
+	addPawnRelation(F6, F7,  -10, -16)
+
+	addPawnRelation(D2, D3,  -13, -14)
+	addPawnRelation(D3, D4,  -13, -14)
+	addPawnRelation(D4, D5,  -13, -14)
+	addPawnRelation(D5, D6,  -13, -14)
+	addPawnRelation(D6, D7,  -13, -14)
+
+	addPawnRelation(E2, E3,  -14, -14)
+	addPawnRelation(E3, E4,  -14, -14)
+	addPawnRelation(E4, E5,  -13, -14)
+	addPawnRelation(E5, E6,  -13, -14)
+	addPawnRelation(E6, E7,  -13, -14)
+
+	// non touching doubled pawns
+	addPawnRelation(A2, A4, 0, -1)
+	addPawnRelation(D2, D4,-1, -1)
+	addPawnRelation(E2, E4,-1, -1)
+    addPawnRelation(H2, H4,-1, -1)
+	addPawnRelation(C3, C5, 1, 0)
+
+	// defended pawns on 3rd line
+	addPawnRelation(A2, B3, 1, 0)
+	addPawnRelation(B2, A3, 1, 0)
+	addPawnRelation(B2, C3, 4, 0)
+	addPawnRelation(C2, B3, 0, 0)
+	addPawnRelation(C2, D3,-2, 0)
+	addPawnRelation(D2, E3, 0, 0)
+	addPawnRelation(F2, E3, 3, 0)
+	addPawnRelation(F2, G3, 6, 0)
+
+	// pawn triangles, apex on 4th line
+	// assumption: defended pawn good,
+	// doubly defended leaves color weakness
+	addPawnRelation(A3, B4, 2, 0)
+	addPawnRelation(C3, B4, 1, 0)
+	addPawnRelation(A3, C3,-1, 0)
+
+	addPawnRelation(B3, C4, 1, 0)
+	addPawnRelation(D3, C4, 1, 0)
+	addPawnRelation(D3, B3,-2, 0)
+
+	addPawnRelation(C3, D4, 5, 0)
+	addPawnRelation(E3, D4, 6, 0)
+	addPawnRelation(C3, E3, -5, 0)
+
+	addPawnRelation(D3, E4, 5, 0)
+	addPawnRelation(F3, E4, 5, 0)
+	addPawnRelation(D3, F3, -12, 0)
+
+	addPawnRelation(E3, F4, 1, 0)
+	addPawnRelation(G3, F4, 1, 0)
+	addPawnRelation(E3, G3, -7, 0)
+
+	addPawnRelation(F3, G4, 1, 0)
+	addPawnRelation(H3, G4, 1, 0)
+	addPawnRelation(F3, H3, -12, 0)
+
+	addPawnRelation(B3, A4,-1, 0)
+	addPawnRelation(G3, H4,-1, 0)
+
+	// defended pawns on the 5th line
+	addPawnRelation(E4, F5, 2, 0)
+	addPawnRelation(G4, H5, -1, 0)
+	addPawnRelation(D4, E5, 3, 0)
+	addPawnRelation(E4, D5, 3, 0)
+
+	// 2-4 rank pattern
+	addPawnRelation(B2, A4,  0, 0)
+	addPawnRelation(A2, B4, -5, 0)
+	addPawnRelation(H2, G4, -5, 0)
+	addPawnRelation(C2, D4, -2, 0)
+    addPawnRelation(C2, B4, -1, 0)
+	addPawnRelation(F2, E4,  1, 0)
+	addPawnRelation(F2, G4, -3, 0)
+	addPawnRelation(G2, H4, -1, 0)
+
+	// 3-5 rank neighbouring pattern
+	addPawnRelation(H3, G5,-1, 0)
+	addPawnRelation(C3, D5, 0, 0)
+	addPawnRelation(F3, E5,-2, 0)
+
+	// binds: assuming good in the center, boring on the wings
+	// (not very interesting term)
+	addPawnRelation(F4, H4,-3, 0)
+	addPawnRelation(C4, E4, 1, 0)
+	addPawnRelation(D4, F4, 1, 0)
+
+    // may or may not be a part of pawn chain
+	addPawnRelation(C3, E5, 1, 0)
+	addPawnRelation(F3, D5,  1, 0)
+
+	// fianchetto complementary
+	addPawnRelation(G3, D3, 3, 0)
+	addPawnRelation(B3, E3, 6, 0)
+	addPawnRelation(G3, C4, 1, 0)
+	addPawnRelation(G3, B5, 1, 0)
+
+	// others
+	addPawnRelation(C3, E4, 3, 0)
+	addPawnRelation(F4, H3, -3, 0)
 
 	for sq := 0; sq < 64; sq++ {
 		phalanxMgByColor[White][sq] = phalanxMG[sq]
@@ -673,4 +815,19 @@ func init() {
 		bishopAdjust[CLASSIC_d4d5][White][sq] = d4d5B[sq]
 		bishopAdjust[CLASSIC_d4d5][Black][sq^56] = d4d5B[sq]
 	}
+}
+
+func addPawnRelation(s1, s2, mgVal, egVal int) {
+    pawnPairMg[White][RelSq(s1, White)][RelSq(s2, White)] += mgVal;
+    pawnPairMg[Black][RelSq(s1, Black)][RelSq(s2, Black)] += mgVal;
+    pawnPairMg[White][RelSq(s2, White)][RelSq(s1, White)] += mgVal;
+    pawnPairMg[Black][RelSq(s2, Black)][RelSq(s1, Black)] += mgVal;
+    pawnPairEg[White][RelSq(s1, White)][RelSq(s2, White)] += egVal;
+    pawnPairEg[Black][RelSq(s1, Black)][RelSq(s2, Black)] += egVal;
+    pawnPairEg[White][RelSq(s2, White)][RelSq(s1, White)] += egVal;
+    pawnPairEg[Black][RelSq(s2, Black)][RelSq(s1, Black)] += egVal;
+}
+
+func RelSq(sq, cl int) int {
+	return ( sq ^ (cl * 56) )
 }
