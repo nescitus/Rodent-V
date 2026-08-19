@@ -540,6 +540,10 @@ func (ss *SearchState) search(p *Pos, ply, alpha, beta, depth int, wasNull bool,
 
 				if useDoubleExt && !isPv && sScore < sBeta-seDoubleMargin {
 					extension = 2
+
+					if useTripleExt && sScore < sBeta-seTripleMargin {
+						extension = 3
+					}
 				}
 			}
 		}

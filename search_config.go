@@ -36,8 +36,10 @@ const (
 
 	useSingularExt = true
 	useDoubleExt   = true
-	seBetaMargin   = 6  // centipawns per ply subtracted from ttScore for singular verification
-	seDoubleMargin = 64 // extra centipawns below singular beta needed for a double extension
+	useTripleExt   = true
+	seBetaMargin   = 6   // centipawns per ply subtracted from ttScore for singular verification
+	seDoubleMargin = 64  // extra centipawns below singular beta needed for a double extension
+	seTripleMargin = 192 // extra centipawns below singular beta needed for a triple extension
 
 	useLMP   = true
 	LMPdepth = 9
