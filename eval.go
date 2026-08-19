@@ -558,20 +558,22 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 		}
 
 		// Pawn pairs
-		if (usePawnPairs) {
-        	second := p.pieceBB(side, P)
-        	for second != 0 {
+		if usePawnPairs {
+			second := p.pieceBB(side, P)
+			for second != 0 {
 				companion := lsb(second)
-            	if (companion > sq) {
-               		add(e, side, EvalPawns,pawnPairMg[side][sq][companion],pawnPairEg[side][sq][companion]);
-            	}
+				if companion > sq {
+					add(e, side, EvalPawns, pawnPairMg[side][sq][companion], pawnPairEg[side][sq][companion])
+				}
 				second &= second - 1
-        	}
+			}
 		}
 
 		// Pawn phalanx: two pawns standing side by side.
-		if shiftSides(b)&p.pieceBB(side, P) > 0 {
-			addPhalanx(e, side, sq)
+		if !usePawnPairs {
+			if shiftSides(b)&p.pieceBB(side, P) > 0 {
+				addPhalanx(e, side, sq)
+			}
 		}
 
 		frontMask := fillForward(b, side)
@@ -598,7 +600,7 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 		// the doubled pawn blocks the most pawn breaks) are hurt the most in MG,
 		// while edge files are punished more in EG (they can rarely promote).
 
-		if (!usePawnPairs) {
+		if !usePawnPairs {
 			pushSq := sq + 8
 			if side == Black {
 				pushSq = sq - 8
@@ -618,7 +620,6 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 		pieces &= pieces - 1
 	}
 }
-
 
 // evaluatePassers scores the passed pawns for one side.
 //

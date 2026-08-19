@@ -296,32 +296,6 @@ var pstEG = [6][64]int{
 	},
 }
 
-// Phalanx pawns are pawns standing side by side.
-// This is generally a good trait, increasing board
-// control.
-
-var phalanxMG = [64]int{
-	0, 0, 0, 0, 0, 0, 0, 0,
-	0, -15, -8, -2, 10, -15, -13, -12,
-	-11, -5, -8, 7, 2, -3, -2, -13,
-	-9, 3, 11, -2, 14, 12, 15, 6,
-	-22, 30, -12, 58, -3, 76, -15, 27,
-	-40, 120, 30, -28, 138, 38, 100, 86,
-	62, 72, 65, 81, 64, 67, 15, -12,
-	0, 0, 0, 0, 0, 0, 0, 0,
-}
-
-var phalanxEG = [64]int{
-	0, 0, 0, 0, 0, 0, 0, 0,
-	-12, -8, -9, 4, 19, -26, 5, -29,
-	-13, -6, 4, -3, 2, -4, -1, -12,
-	-7, 2, 2, 13, 9, 0, 2, -12,
-	44, -3, 47, 14, 47, -6, 22, 5,
-	21, 147, 98, 153, 41, 18, 137, -98,
-	257, 296, 172, 193, 257, 284, 280, 192,
-	0, 0, 0, 0, 0, 0, 0, 0,
-}
-
 var frenchHighP = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -586,6 +560,32 @@ var d4d5B = [64]int{
 	0, 0, 0, 0, 0, 0, 0, 0,
 }
 
+// Phalanx pawns are pawns standing side by side.
+// This is generally a good trait, increasing board
+// control.
+
+var phalanxMG = [64]int{
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, -15, -8, -2, 10, -15, -13, -12,
+	-11, -5, -8, 7, 2, -3, -2, -13,
+	-9, 3, 11, -2, 14, 12, 15, 6,
+	-22, 30, -12, 58, -3, 76, -15, 27,
+	-40, 120, 30, -28, 138, 38, 100, 86,
+	62, 72, 65, 81, 64, 67, 15, -12,
+	0, 0, 0, 0, 0, 0, 0, 0,
+}
+
+var phalanxEG = [64]int{
+	0, 0, 0, 0, 0, 0, 0, 0,
+	-12, -8, -9, 4, 19, -26, 5, -29,
+	-13, -6, 4, -3, 2, -4, -1, -12,
+	-7, 2, 2, 13, 9, 0, 2, -12,
+	44, -3, 47, 14, 47, -6, 22, 5,
+	21, 147, 98, 153, 41, 18, 137, -98,
+	257, 296, 172, 193, 257, 284, 280, 192,
+	0, 0, 0, 0, 0, 0, 0, 0,
+}
+
 // per-color tables used to speed up the evaluation
 
 var pstMGByColor [2][6][64]int
@@ -596,8 +596,8 @@ var phalanxEgByColor [2][64]int
 var pawnAdjust [Undefined][2][64]int
 var knightAdjust [Undefined][2][64]int
 var bishopAdjust [Undefined][2][64]int
-var pawnPairMg[2][64][64] int
-var pawnPairEg[2][64][64] int
+var pawnPairMg [2][64][64]int
+var pawnPairEg [2][64][64]int
 
 // Init
 
@@ -611,11 +611,63 @@ func init() {
 			pstEGByColor[Black][piece][sq^56] = pstEG[piece][sq]
 		}
 	}
-	usePawnPairs = false //
+	usePawnPairs = true //
 
 	// 56.378785953357436
-	// 56.321991399224174
-	
+	// 56.31663728940054
+	// 56.83301465541694 no phalanx
+	// 56.286384441208995
+
+	// phalanx
+
+	addPawnRelation(A7, B7, 134, 422)
+	addPawnRelation(B7, C7, 86, 332)
+	addPawnRelation(C7, D7, 58, 323)
+	addPawnRelation(D7, E7, 60, 322)
+	addPawnRelation(E7, F7, 60, 322)
+	addPawnRelation(F7, G7, 88, 322)
+	addPawnRelation(G7, H7, 134, 442)
+
+	addPawnRelation(A6, B6, 50, 168)
+	addPawnRelation(B6, C6, 50, 220)
+	addPawnRelation(C6, D6, 46, 160)
+	addPawnRelation(D6, E6, 46, 180)
+	addPawnRelation(E6, F6, 46, 90)
+	addPawnRelation(F6, G6, 52, 180)
+	addPawnRelation(G6, H6, 50, 150)
+
+	addPawnRelation(A5, B5, 8, 42)
+	addPawnRelation(B5, C5, 15, 42)
+	addPawnRelation(C5, D5, 35, 42)
+	addPawnRelation(D5, E5, 45, 42)
+	addPawnRelation(E5, F5, 40, 42)
+	addPawnRelation(F5, G5, 41, 42)
+	addPawnRelation(G5, H5, 15, 42)
+
+	addPawnRelation(A4, B4, 4, 8)
+	addPawnRelation(B4, C4, 10, 9)
+	addPawnRelation(C4, D4, 16, 8)
+	addPawnRelation(D4, E4, 25, 6)
+	addPawnRelation(E4, F4, 19, 8)
+	addPawnRelation(F4, G4, 14, 9)
+	addPawnRelation(G4, H4, 4, 8)
+
+	addPawnRelation(A3, B3, -4, -10)
+	addPawnRelation(B3, C3, -2, -10)
+	addPawnRelation(C3, D3, 6, -10)
+	addPawnRelation(D3, E3, 6, -10)
+	addPawnRelation(E3, F3, 2, -10)
+	addPawnRelation(F3, G3, 1, -10)
+	addPawnRelation(G3, H3, -1, -10)
+
+	addPawnRelation(A2, B2, -14, -18)
+	addPawnRelation(B2, C2, -14, -16)
+	addPawnRelation(C2, D2, -14, -16)
+	addPawnRelation(D2, E2, -5, -15)
+	addPawnRelation(E2, F2, -5, -16)
+	addPawnRelation(F2, G2, -14, -16)
+	addPawnRelation(G2, H2, -14, -18)
+
 	// touching doubled pawns
 	addPawnRelation(A2, A3, -18, -28)
 	addPawnRelation(A3, A4, -18, -28)
@@ -629,47 +681,52 @@ func init() {
 	addPawnRelation(H5, H6, -18, -28)
 	addPawnRelation(H6, H7, -18, -28)
 
-	addPawnRelation(B2, B3,  1, -14)
-	addPawnRelation(B3, B4,  1, -14)
-	addPawnRelation(B4, B5,  1, -14)
-	addPawnRelation(B5, B6,  1, -14)
-	addPawnRelation(B6, B7,  1, -14)
+	addPawnRelation(B2, B3, 2, -14)
+	addPawnRelation(B3, B4, 1, -14)
+	addPawnRelation(B4, B5, 1, -14)
+	addPawnRelation(B5, B6, 1, -14)
+	addPawnRelation(B6, B7, 1, -14)
 
-	addPawnRelation(G2, G3,  1, -14)
-	addPawnRelation(G3, G4,  1, -14)
-	addPawnRelation(G4, G5,  1, -14)
-	addPawnRelation(G5, G6,  1, -14)
-	addPawnRelation(G6, G7,  1, -14)
+	addPawnRelation(G2, G3, 2, -14)
+	addPawnRelation(G3, G4, 1, -14)
+	addPawnRelation(G4, G5, 1, -14)
+	addPawnRelation(G5, G6, 1, -14)
+	addPawnRelation(G6, G7, 1, -14)
 
-	addPawnRelation(C2, C3,  -10, -16)
-	addPawnRelation(C3, C4,  -11, -16)
-	addPawnRelation(C4, C5,  -10, -16)
-	addPawnRelation(C5, C6,  -10, -16)
-	addPawnRelation(C6, C7,  -10, -16)
+	addPawnRelation(C2, C3, -10, -16)
+	addPawnRelation(C3, C4, -11, -16)
+	addPawnRelation(C4, C5, -10, -16)
+	addPawnRelation(C5, C6, -10, -16)
+	addPawnRelation(C6, C7, -10, -16)
 
-	addPawnRelation(F2, F3,  -10, -16)
-	addPawnRelation(F3, F4,  -10, -16)
-	addPawnRelation(F4, F5,  -10, -16)
-	addPawnRelation(F5, F6,  -10, -16)
-	addPawnRelation(F6, F7,  -10, -16)
+	addPawnRelation(F2, F3, -10, -16)
+	addPawnRelation(F3, F4, -10, -16)
+	addPawnRelation(F4, F5, -10, -16)
+	addPawnRelation(F5, F6, -10, -16)
+	addPawnRelation(F6, F7, -10, -16)
 
-	addPawnRelation(D2, D3,  -13, -14)
-	addPawnRelation(D3, D4,  -13, -14)
-	addPawnRelation(D4, D5,  -13, -14)
-	addPawnRelation(D5, D6,  -13, -14)
-	addPawnRelation(D6, D7,  -13, -14)
+	addPawnRelation(D2, D3, -13, -14)
+	addPawnRelation(D3, D4, -13, -14)
+	addPawnRelation(D4, D5, -13, -14)
+	addPawnRelation(D5, D6, -13, -14)
+	addPawnRelation(D6, D7, -13, -14)
 
-	addPawnRelation(E2, E3,  -14, -14)
-	addPawnRelation(E3, E4,  -14, -14)
-	addPawnRelation(E4, E5,  -13, -14)
-	addPawnRelation(E5, E6,  -13, -14)
-	addPawnRelation(E6, E7,  -13, -14)
+	addPawnRelation(E2, E3, -14, -14)
+	addPawnRelation(E3, E4, -14, -14)
+	addPawnRelation(E4, E5, -13, -14)
+	addPawnRelation(E5, E6, -13, -14)
+	addPawnRelation(E6, E7, -13, -14)
 
 	// non touching doubled pawns
 	addPawnRelation(A2, A4, 0, -1)
-	addPawnRelation(D2, D4,-1, -1)
-	addPawnRelation(E2, E4,-1, -1)
-    addPawnRelation(H2, H4,-1, -1)
+	addPawnRelation(B2, B4, 1, 0)
+	addPawnRelation(C2, C4, 1, 0)
+	addPawnRelation(D2, D4, -2, -1)
+	addPawnRelation(E2, E4, -2, -1)
+	addPawnRelation(F2, F4, 2, 0)
+	addPawnRelation(G2, G4, 1, 0)
+	addPawnRelation(H2, H4, -1, -1)
+
 	addPawnRelation(C3, C5, 1, 0)
 
 	// defended pawns on 3rd line
@@ -677,7 +734,7 @@ func init() {
 	addPawnRelation(B2, A3, 1, 0)
 	addPawnRelation(B2, C3, 4, 0)
 	addPawnRelation(C2, B3, 0, 0)
-	addPawnRelation(C2, D3,-2, 0)
+	addPawnRelation(C2, D3, -2, 0)
 	addPawnRelation(D2, E3, 0, 0)
 	addPawnRelation(F2, E3, 3, 0)
 	addPawnRelation(F2, G3, 6, 0)
@@ -687,11 +744,11 @@ func init() {
 	// doubly defended leaves color weakness
 	addPawnRelation(A3, B4, 2, 0)
 	addPawnRelation(C3, B4, 1, 0)
-	addPawnRelation(A3, C3,-1, 0)
+	addPawnRelation(A3, C3, -1, 0)
 
 	addPawnRelation(B3, C4, 1, 0)
 	addPawnRelation(D3, C4, 1, 0)
-	addPawnRelation(D3, B3,-2, 0)
+	addPawnRelation(D3, B3, -2, 0)
 
 	addPawnRelation(C3, D4, 5, 0)
 	addPawnRelation(E3, D4, 6, 0)
@@ -709,49 +766,98 @@ func init() {
 	addPawnRelation(H3, G4, 1, 0)
 	addPawnRelation(F3, H3, -12, 0)
 
-	addPawnRelation(B3, A4,-1, 0)
-	addPawnRelation(G3, H4,-1, 0)
+	addPawnRelation(B3, A4, -1, 0)
+	addPawnRelation(G3, H4, -1, 0)
 
 	// defended pawns on the 5th line
-	addPawnRelation(E4, F5, 2, 0)
-	addPawnRelation(G4, H5, -1, 0)
-	addPawnRelation(D4, E5, 3, 0)
-	addPawnRelation(E4, D5, 3, 0)
+	addPawnRelation(B4, A5, -1, 3)
+	addPawnRelation(A4, B5, 1, 3)
+	addPawnRelation(C4, B5, 1, 3)
+	addPawnRelation(B4, C5, 1, 3)
+	addPawnRelation(D4, C5, 0, 3)
+	addPawnRelation(C4, D5, 4, 3)
+	addPawnRelation(E4, D5, 7, 3)
+	addPawnRelation(D4, E5, 7, 3)
+	addPawnRelation(F4, E5, 4, 3)
+	addPawnRelation(E4, F5, 2, 3)
+	addPawnRelation(G4, F5, 0, 3)
+	addPawnRelation(F4, G5, 1, 3)
+	addPawnRelation(H4, G5, 1, 3)
+	addPawnRelation(G4, H5, -1, 3)
+
+	// defended pawns on the 6th line
+	addPawnRelation(B5, A6, 3, 7)
+	addPawnRelation(A5, B6, 3, 7)
+	addPawnRelation(C5, B6, 3, 7)
+	addPawnRelation(B5, C6, 3, 7)
+	addPawnRelation(D5, C6, 3, 7)
+	addPawnRelation(C5, D6, 3, 7)
+	addPawnRelation(E5, D6, 3, 7)
+	addPawnRelation(D5, E6, 3, 7)
+	addPawnRelation(F5, E6, 3, 7)
+	addPawnRelation(E5, F6, 3, 7)
+	addPawnRelation(G5, F6, 3, 7)
+	addPawnRelation(F5, G6, 3, 7)
+	addPawnRelation(H5, G6, 3, 7)
+	addPawnRelation(G5, H6, 3, 7)
+
+	// defended pawns on the 7th line
+	addPawnRelation(B6, A7, 4, 12)
+	addPawnRelation(A6, B7, 4, 12)
+	addPawnRelation(C6, B7, 4, 12)
+	addPawnRelation(B6, C7, 4, 12)
+	addPawnRelation(D6, C7, 4, 12)
+	addPawnRelation(C6, D7, 4, 12)
+	addPawnRelation(E6, D7, 4, 12)
+	addPawnRelation(D6, E7, 4, 12)
+	addPawnRelation(F6, E7, 4, 12)
+	addPawnRelation(E6, F7, 4, 12)
+	addPawnRelation(G6, F7, 4, 12)
+	addPawnRelation(F6, G7, 4, 12)
+	addPawnRelation(H6, G7, 4, 12)
+	addPawnRelation(G6, H7, 4, 12)
 
 	// 2-4 rank pattern
-	addPawnRelation(B2, A4,  0, 0)
+	addPawnRelation(B2, A4, 0, 0)
 	addPawnRelation(A2, B4, -5, 0)
 	addPawnRelation(H2, G4, -5, 0)
 	addPawnRelation(C2, D4, -2, 0)
-    addPawnRelation(C2, B4, -1, 0)
-	addPawnRelation(F2, E4,  1, 0)
+	addPawnRelation(C2, B4, -1, 0)
+	addPawnRelation(F2, E4, 1, 0)
 	addPawnRelation(F2, G4, -3, 0)
 	addPawnRelation(G2, H4, -1, 0)
 
 	// 3-5 rank neighbouring pattern
-	addPawnRelation(H3, G5,-1, 0)
+	addPawnRelation(H3, G5, -1, 0)
 	addPawnRelation(C3, D5, 0, 0)
-	addPawnRelation(F3, E5,-2, 0)
+	addPawnRelation(F3, E5, -2, 0)
 
 	// binds: assuming good in the center, boring on the wings
 	// (not very interesting term)
-	addPawnRelation(F4, H4,-3, 0)
+	addPawnRelation(F4, H4, -3, 0)
 	addPawnRelation(C4, E4, 1, 0)
 	addPawnRelation(D4, F4, 1, 0)
 
-    // may or may not be a part of pawn chain
-	addPawnRelation(C3, E5, 1, 0)
-	addPawnRelation(F3, D5,  1, 0)
+	// may or may not be a part of pawn chain
+	addPawnRelation(C3, E5, 2, 0)
+	addPawnRelation(F3, D5, 1, 0)
 
 	// fianchetto complementary
-	addPawnRelation(G3, D3, 3, 0)
-	addPawnRelation(B3, E3, 6, 0)
-	addPawnRelation(G3, C4, 1, 0)
+	addPawnRelation(G3, D3, 5, 0)
+	addPawnRelation(B3, E3, 7, 0)
+	addPawnRelation(G3, C4, 2, 0)
 	addPawnRelation(G3, B5, 1, 0)
 
 	// others
-	addPawnRelation(C3, E4, 3, 0)
+	addPawnRelation(A3, C4, 4, 0)
+	addPawnRelation(B3, D4, -1, 0)
+	addPawnRelation(C3, E4, 4, 0)
+	addPawnRelation(F3, D4, 0, 0)
 	addPawnRelation(F4, H3, -3, 0)
+
+	addPawnRelation(B4, G4, -1, 0)
+	addPawnRelation(B4, G5, -2, 0)
+	addPawnRelation(G4, B5, -2, 0)
 
 	for sq := 0; sq < 64; sq++ {
 		phalanxMgByColor[White][sq] = phalanxMG[sq]
@@ -818,16 +924,16 @@ func init() {
 }
 
 func addPawnRelation(s1, s2, mgVal, egVal int) {
-    pawnPairMg[White][RelSq(s1, White)][RelSq(s2, White)] += mgVal;
-    pawnPairMg[Black][RelSq(s1, Black)][RelSq(s2, Black)] += mgVal;
-    pawnPairMg[White][RelSq(s2, White)][RelSq(s1, White)] += mgVal;
-    pawnPairMg[Black][RelSq(s2, Black)][RelSq(s1, Black)] += mgVal;
-    pawnPairEg[White][RelSq(s1, White)][RelSq(s2, White)] += egVal;
-    pawnPairEg[Black][RelSq(s1, Black)][RelSq(s2, Black)] += egVal;
-    pawnPairEg[White][RelSq(s2, White)][RelSq(s1, White)] += egVal;
-    pawnPairEg[Black][RelSq(s2, Black)][RelSq(s1, Black)] += egVal;
+	pawnPairMg[White][RelSq(s1, White)][RelSq(s2, White)] += mgVal
+	pawnPairMg[Black][RelSq(s1, Black)][RelSq(s2, Black)] += mgVal
+	pawnPairMg[White][RelSq(s2, White)][RelSq(s1, White)] += mgVal
+	pawnPairMg[Black][RelSq(s2, Black)][RelSq(s1, Black)] += mgVal
+	pawnPairEg[White][RelSq(s1, White)][RelSq(s2, White)] += egVal
+	pawnPairEg[Black][RelSq(s1, Black)][RelSq(s2, Black)] += egVal
+	pawnPairEg[White][RelSq(s2, White)][RelSq(s1, White)] += egVal
+	pawnPairEg[Black][RelSq(s2, Black)][RelSq(s1, Black)] += egVal
 }
 
 func RelSq(sq, cl int) int {
-	return ( sq ^ (cl * 56) )
+	return (sq ^ (cl * 56))
 }
