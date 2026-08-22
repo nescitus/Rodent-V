@@ -40,6 +40,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"runtime/pprof"
 	"strconv"
 )
@@ -116,6 +117,31 @@ func main() {
 			if err != nil {
 				fmt.Println("Error:", err)
 			}
+			return
+
+		case "relabel":
+			if len(os.Args) < 3 {
+				fmt.Println("usage: rodent_v relabel <input.vf> [output.vf] [net_path.bin] [threads]")
+				return
+			}
+			inputFile := os.Args[2]
+			outputFile := ""
+			netFile := ""
+			numThreads := runtime.NumCPU()
+
+			if len(os.Args) > 3 && os.Args[3] != "" {
+				outputFile = os.Args[3]
+			}
+			if len(os.Args) > 4 && os.Args[4] != "" {
+				netFile = os.Args[4]
+			}
+			if len(os.Args) > 5 {
+				t, err := strconv.Atoi(os.Args[5])
+				if err == nil && t > 0 {
+					numThreads = t
+				}
+			}
+			runRelabel(inputFile, outputFile, netFile, numThreads)
 			return
 		case "alloptions":
 			// Engine will hide personality path and print UCI options.
