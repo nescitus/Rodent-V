@@ -143,6 +143,38 @@ func main() {
 			}
 			runRelabel(inputFile, outputFile, netFile, numThreads)
 			return
+
+		case "rescore":
+			if len(os.Args) < 3 {
+				fmt.Println("usage: rodent_v rescore <input.txt> [output.txt] [nodes_per_pos] [threads] [net_path.bin]")
+				return
+			}
+			inputFile := os.Args[2]
+			outputFile := ""
+			nodesPerPos := 1000
+			numThreads := runtime.NumCPU()
+			netFile := ""
+
+			if len(os.Args) > 3 && os.Args[3] != "" {
+				outputFile = os.Args[3]
+			}
+			if len(os.Args) > 4 && os.Args[4] != "" {
+				n, err := strconv.Atoi(os.Args[4])
+				if err == nil && n > 0 {
+					nodesPerPos = n
+				}
+			}
+			if len(os.Args) > 5 && os.Args[5] != "" {
+				t, err := strconv.Atoi(os.Args[5])
+				if err == nil && t > 0 {
+					numThreads = t
+				}
+			}
+			if len(os.Args) > 6 && os.Args[6] != "" {
+				netFile = os.Args[6]
+			}
+			runRescoreText(inputFile, outputFile, nodesPerPos, numThreads, netFile)
+			return
 		case "alloptions":
 			// Engine will hide personality path and print UCI options.
 			// No return statement, we want to use Rodent like that!
