@@ -44,7 +44,7 @@ import (
 	"strconv"
 )
 
-const versionString = "1.1.03"
+const versionString = "1.1.01"
 
 // init() is guaranteed to run before main()
 func init() {
@@ -83,14 +83,14 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "tune":
-			ctTune("d:/epd/lichess-quiet.epd", 200, 2.0)
+			tv2Tune("d:/epd/lichess-quiet.epd", 200, 2.0)
 			return
 		case "tunefile":
 			if len(os.Args) < 3 {
 				fmt.Println("usage: rodent-v tunefile <epd-or-book-file>")
 				return
 			}
-			ctTune(os.Args[2], 5000, 1.0)
+			tv2Tune(os.Args[2], 5000, 1.0)
 			return
 		case "datagen":
 			if len(os.Args) < 5 {
