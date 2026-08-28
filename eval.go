@@ -395,7 +395,7 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		mob := popCount(atks) - mobOffset[R]
 		add(e, side, EvalMobility, mobMG[R]*mob, mobEG[R]*mob)
 
-		// rook attacks enemy king
+		// Rook attacks enemy king.
 		if ringAtks := atks & enemyRing; ringAtks != 0 {
 			e.attackWt[side] += kingAttackerWeight[R]
 			e.attackCnt[side] += popCount(ringAtks)
@@ -405,7 +405,7 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		fileMask := fileABB << uint(fileOf(sq))
 		ownPawnsOnFile := fileMask & p.pieceBB(side, P)
 		if ownPawnsOnFile == 0 {
-			if fileMask&p.pieceBB(opp(side), P) == 0 {
+			if fileMask&p.pieceBB(enemy, P) == 0 {
 				add(e, side, EvalOther, rookOpenFileMG, rookOpenFileEG)
 			} else {
 				add(e, side, EvalOther, rookSemiOpenFileMG, rookSemiOpenFileEG)
@@ -475,40 +475,32 @@ func initCenterType(p *Pos, e *EvalData) {
 	wide := fileCBB | fileDBB | fileEBB // wide center (c-d-e files)
 
 	// may be overridden by French
-	if isOnSq(p, White, P, D4) && isOnSq(p, Black, P, D5) {
-		e.center[White] = CLASSIC_d4d5
-		e.center[Black] = CLASSIC_d4d5
+	if isPawnRam(p, D4, D5) {
+		setCenterType(e, CLASSIC_d4d5, CLASSIC_d4d5)
 	}
 
 	// may be overridden by KID or Sicilian
-	if isOnSq(p, White, P, E4) && isOnSq(p, Black, P, E5) {
-		e.center[White] = CLASSIC_e4e5
-		e.center[Black] = CLASSIC_e4e5
+	if isPawnRam(p, E4, E5) {
+		setCenterType(e, CLASSIC_e4e5, CLASSIC_e4e5)
 	}
 
 	// detect closed centers (KID / French)
 	if popCount(p.pieceBB(White, P)&narrow) == 2 &&
 		popCount(p.pieceBB(Black, P)&narrow) == 2 {
 
-		if isOnSq(p, White, P, E4) && isOnSq(p, Black, P, E5) {
-
-			if isOnSq(p, White, P, D5) && isOnSq(p, Black, P, D6) {
-				e.center[White] = KID_high
-				e.center[Black] = KID_low
-			} else if isOnSq(p, White, P, D3) && isOnSq(p, Black, P, D4) {
-				e.center[White] = KID_low
-				e.center[Black] = KID_high
+		if isPawnRam(p, E4, E5) {
+			if isPawnRam(p, D5, D6) {
+				setCenterType(e, KID_high, KID_low)
+			} else if isPawnRam(p, D3, D4) {
+				setCenterType(e, KID_low, KID_high)
 			}
 		}
 
-		if isOnSq(p, White, P, D4) && isOnSq(p, Black, P, D5) {
-
-			if isOnSq(p, White, P, E5) && isOnSq(p, Black, P, E6) {
-				e.center[White] = FRENCH_high
-				e.center[Black] = FRENCH_low
-			} else if isOnSq(p, White, P, E3) && isOnSq(p, Black, P, E4) {
-				e.center[White] = FRENCH_low
-				e.center[Black] = FRENCH_high
+		if isPawnRam(p, D4, D5) {
+			if isPawnRam(p, E5, E6) {
+				setCenterType(e, FRENCH_high, FRENCH_low)
+			} else if isPawnRam(p, E3, E4) {
+				setCenterType(e, FRENCH_low, FRENCH_high)
 			}
 		}
 	}
@@ -520,17 +512,24 @@ func initCenterType(p *Pos, e *EvalData) {
 		if popCount(p.pieceBB(White, P)&fileDBB) == 0 &&
 			popCount(p.pieceBB(Black, P)&fileCBB) == 0 &&
 			isOnSq(p, White, P, E4) {
-			e.center[White] = SICILIAN_high
-			e.center[Black] = SICILIAN_low
+			setCenterType(e, SICILIAN_high, SICILIAN_low)
 		}
 
 		if popCount(p.pieceBB(Black, P)&fileDBB) == 0 &&
 			popCount(p.pieceBB(White, P)&fileCBB) == 0 &&
 			isOnSq(p, Black, P, E5) {
-			e.center[White] = SICILIAN_low
-			e.center[Black] = SICILIAN_high
+			setCenterType(e, SICILIAN_low, SICILIAN_high)
 		}
 	}
+}
+
+func isPawnRam(p *Pos, wsq, bsq int) bool {
+	return isOnSq(p, White, P, wsq) && isOnSq(p, Black, P, bsq)
+}
+
+func setCenterType(e *EvalData, whiteCenter, blackCenter CenterType) {
+	e.center[White] = whiteCenter
+	e.center[Black] = blackCenter
 }
 
 // evaluatePawns evaluates pawn structure
@@ -586,20 +585,14 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 		// the doubled pawn blocks the most pawn breaks) are hurt the most in MG,
 		// while edge files are punished more in EG (they can rarely promote).
 
-		pushSq := sq + 8
-		if side == Black {
-			pushSq = sq - 8
-		}
+		pushSq := getPushSq(side, sq)
 
 		if pushSq >= 0 && pushSq < 64 && p.pieceBB(side, P)&squareBit(pushSq) != 0 {
-			// Only penalise if the doubled pawn has no immediate captures.
-			//if pawnAtk[side][sq]&p.pieceBB(opp(side), P) == 0 {
 			fileIdx := fileOf(sq)
 			if fileIdx > 3 {
 				fileIdx = 7 - fileIdx
 			}
 			add(e, side, EvalPawns, doubledPawnMG[fileIdx], doubledPawnEG[fileIdx])
-			//}
 		}
 
 		pieces &= pieces - 1
@@ -613,7 +606,7 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 //	rank; a pawn on the 7th rank is almost a queen.
 
 func evaluatePassers(p *Pos, e *EvalData, side int) {
-
+	enemy := opp(side)
 	pieces := p.pieceBB(side, P)
 
 	for pieces != 0 {
@@ -621,22 +614,15 @@ func evaluatePassers(p *Pos, e *EvalData, side int) {
 		add(e, side, EvalMaterial, pieceValMG[P], pieceValEG[P])
 		addPST(e, side, P, sq)
 
-		// pushSq: the square directly in front of this pawn.
-		// Pawns can't legally sit on the promotion rank, but guard anyway.
-		pushSq := sq + 8
-		if side == Black {
-			pushSq = sq - 8
-		}
-
 		// Passed pawn: no enemy pawns in front on same or adjacent files.
-		if passedMask[side][sq]&p.pieceBB(opp(side), P) == 0 {
+		if passedMask[side][sq]&p.pieceBB(enemy, P) == 0 {
+
+			// pushSq: the square directly in front of this pawn.
+			// Pawns can't legally sit on the promotion rank, but guard anyway.
+			pushSq := getPushSq(side, sq)
+
 			// Relative rank: 0 = own back rank, 7 = promotion square.
-			var relRank int
-			if side == White {
-				relRank = rankOf(sq)
-			} else {
-				relRank = 7 - rankOf(sq)
-			}
+			relRank := getRelRank(side, sq)
 
 			// Blocked: any piece standing on the push square.
 			// pushSq is valid for all legal pawn squares (rank 1..6 for White,
@@ -651,14 +637,14 @@ func evaluatePassers(p *Pos, e *EvalData, side int) {
 			// Our king wants to escort; enemy king wants to block.
 			if relRank >= 3 && pushSq >= 0 && pushSq < 64 {
 				ourDist := chebyshev(p.kingSq[side], pushSq)
-				theirDist := chebyshev(p.kingSq[opp(side)], pushSq)
+				theirDist := chebyshev(p.kingSq[enemy], pushSq)
 				add(e, side, EvalPassers, ourPasserProximityMG[ourDist], ourPasserProximityEG[ourDist])
 				add(e, side, EvalPassers, theirPasserProximityMG[theirDist], theirPasserProximityEG[theirDist])
 
 				// Slider behind: enemy rook or queen behind the passer on
 				// the same file controls the promotion path.
 				behindMask := fillBackward(squareBit(sq), side)
-				enemySliders := p.pieceBB(opp(side), R) | p.pieceBB(opp(side), Q)
+				enemySliders := p.pieceBB(enemy, R) | p.pieceBB(enemy, Q)
 				if behindMask&enemySliders != 0 {
 					add(e, side, EvalPassers, -25, -45)
 				}
@@ -880,6 +866,20 @@ func evaluateThreats(p *Pos, e *EvalData, side int) {
 }
 
 // --- Helpers ---
+
+func getRelRank(side, sq int) int {
+	if side == White {
+		return rankOf(sq)
+	} 
+	return 7 - rankOf(sq)		
+}
+
+func getPushSq(side, sq int) int {
+	if side == White {
+		return sq + 8
+	}
+	return sq - 8
+}
 
 func addPhalanx(e *EvalData, side, sq int) {
 	add(e, side, EvalPawns, phalanxMgByColor[side][sq], phalanxEgByColor[side][sq])

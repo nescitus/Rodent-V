@@ -84,7 +84,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "tune":
-			tv2Tune("quiet-labeled.epd", 5000, 1.0)
+			tv2Tune("d:/epd/lichess-quiet.epd", 200, 2.0)
 			return
 		case "tunefile":
 			if len(os.Args) < 3 {
@@ -174,6 +174,18 @@ func main() {
 				netFile = os.Args[6]
 			}
 			runRescoreText(inputFile, outputFile, nodesPerPos, numThreads, netFile)
+		case "fit":
+			ss := new(SearchState)
+			ss.tt = &mainTT
+			ss.isMainThread = true
+			ss.isUsingNNUE = false
+
+			fit, err := texelFitFile("d:/epd/zuri_orig.epd", func(p *Pos) int {
+				return eval_internal(p, false, ss)
+			})
+			if err == nil {
+				fmt.Println(fit)
+			}
 			return
 		case "alloptions":
 			// Engine will hide personality path and print UCI options.
