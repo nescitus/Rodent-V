@@ -69,10 +69,8 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 	u.flag = uNORMAL
 
 	// Append current key to the repetition history.
-	if p.histLen < len(p.keyHist) {
-		p.keyHist[p.histLen] = p.key
-		p.histLen++
-	}
+	p.keyHist[p.histLen] = p.key
+	p.histLen++
 
 	if moveType(move) == CASTLE {
 		u.captType = NO_TP // FRC Castling is not a capture, even if it lands on a friendly rook

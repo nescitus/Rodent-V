@@ -40,12 +40,11 @@ package main
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"runtime/pprof"
 	"strconv"
 )
 
-const versionString = "1.1.01"
+const versionString = "1.1.02"
 
 // init() is guaranteed to run before main()
 func init() {
@@ -84,14 +83,14 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "tune":
-			tv2Tune("d:/epd/lichess-quiet.epd", 200, 2.0)
+			ctTune("d:/epd/lichess-sym.epd", 400, 0.25, 0)
 			return
 		case "tunefile":
 			if len(os.Args) < 3 {
 				fmt.Println("usage: rodent-v tunefile <epd-or-book-file>")
 				return
 			}
-			tv2Tune(os.Args[2], 5000, 1.0)
+			ctTune(os.Args[2], 5000, 1.0, 1.0)
 			return
 		case "datagen":
 			if len(os.Args) < 5 {
@@ -118,62 +117,6 @@ func main() {
 				fmt.Println("Error:", err)
 			}
 			return
-
-		case "relabel":
-			if len(os.Args) < 3 {
-				fmt.Println("usage: rodent_v relabel <input.vf> [output.vf] [net_path.bin] [threads]")
-				return
-			}
-			inputFile := os.Args[2]
-			outputFile := ""
-			netFile := ""
-			numThreads := runtime.NumCPU()
-
-			if len(os.Args) > 3 && os.Args[3] != "" {
-				outputFile = os.Args[3]
-			}
-			if len(os.Args) > 4 && os.Args[4] != "" {
-				netFile = os.Args[4]
-			}
-			if len(os.Args) > 5 {
-				t, err := strconv.Atoi(os.Args[5])
-				if err == nil && t > 0 {
-					numThreads = t
-				}
-			}
-			runRelabel(inputFile, outputFile, netFile, numThreads)
-			return
-
-		case "rescore":
-			if len(os.Args) < 3 {
-				fmt.Println("usage: rodent_v rescore <input.txt> [output.txt] [nodes_per_pos] [threads] [net_path.bin]")
-				return
-			}
-			inputFile := os.Args[2]
-			outputFile := ""
-			nodesPerPos := 1000
-			numThreads := runtime.NumCPU()
-			netFile := ""
-
-			if len(os.Args) > 3 && os.Args[3] != "" {
-				outputFile = os.Args[3]
-			}
-			if len(os.Args) > 4 && os.Args[4] != "" {
-				n, err := strconv.Atoi(os.Args[4])
-				if err == nil && n > 0 {
-					nodesPerPos = n
-				}
-			}
-			if len(os.Args) > 5 && os.Args[5] != "" {
-				t, err := strconv.Atoi(os.Args[5])
-				if err == nil && t > 0 {
-					numThreads = t
-				}
-			}
-			if len(os.Args) > 6 && os.Args[6] != "" {
-				netFile = os.Args[6]
-			}
-			runRescoreText(inputFile, outputFile, nodesPerPos, numThreads, netFile)
 		case "fit":
 			ss := new(SearchState)
 			ss.tt = &mainTT

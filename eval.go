@@ -313,8 +313,8 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		e.addAttacks(side, N, atks)
 
 		// knight mobility
-		mob := popCount(atks&^p.colorBB[side]) - mobOffset[N]
-		add(e, side, EvalMobility, mobMG[N]*mob, mobEG[N]*mob)
+		mob := popCount(atks&^p.colorBB[side])
+		add(e, side, EvalMobility, nMobMg[mob], nMobEg[mob])
 
 		// knight attacks enemy king
 		if ringAtks := atks & enemyRing; ringAtks != 0 {
@@ -355,8 +355,8 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		e.addAttacks(side, B, bishopAttacks(occ, sq))
 
 		// bishop mobility
-		mob := popCount(atks) - mobOffset[B]
-		add(e, side, EvalMobility, mobMG[B]*mob, mobEG[B]*mob)
+		mob := popCount(atks)
+		add(e, side, EvalMobility, bMobMg[mob], bMobEg[mob])
 
 		// bishop attacks enemy king
 		if ringAtks := atks & enemyRing; ringAtks != 0 {
@@ -392,8 +392,8 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		e.addAttacks(side, R, rookAttacks(occ, sq))
 
 		// rook mobility
-		mob := popCount(atks) - mobOffset[R]
-		add(e, side, EvalMobility, mobMG[R]*mob, mobEG[R]*mob)
+		mob := popCount(atks)
+		add(e, side, EvalMobility,rMobMg[mob], rMobEg[mob])
 
 		// Rook attacks enemy king.
 		if ringAtks := atks & enemyRing; ringAtks != 0 {
@@ -430,8 +430,8 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		e.addAttacks(side, Q, queenAttacks(occ, sq))
 
 		// queen mobility
-		mob := popCount(atks) - mobOffset[Q]
-		add(e, side, EvalMobility, mobMG[Q]*mob, mobEG[Q]*mob)
+		mob := popCount(atks)
+		add(e, side, EvalMobility, qMobMg[mob], qMobEg[mob])
 
 		// queen attacks enemy king
 		if ringAtks := atks & enemyRing; ringAtks != 0 {
@@ -557,7 +557,7 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 		}
 
 		// Pawn phalanx: two pawns standing side by side.
-		if shiftSides(b)&p.pieceBB(side, P) > 0 {
+		if shiftWest(b)&p.pieceBB(side, P) > 0 {
 			addPhalanx(e, side, sq)
 		}
 
