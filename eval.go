@@ -104,23 +104,6 @@ func init() {
 	initPawnHash(64 * 128)
 }
 
-// tunerDisableKingSafety: when true, evaluateKing skips the danger
-// calculation and pawnShieldMG returns 0, so the tuner's BaseScore
-// excludes king safety (the tuner adds it back via its own parameters).
-var tunerDisableKingSafety bool
-
-// tunerDisableThreats: when true, evaluateThreats is skipped so the
-// tuner's BaseScore excludes threats (added back via tuner parameters).
-var tunerDisableThreats bool
-
-// tunerDisableMaterial: when true, piece value scores are excluded from
-// BaseScore so the tuner can tune pieceValMG/EG directly.
-var tunerDisableMaterial bool
-
-// tunerDisableMobility: when true, mobility scores are excluded from
-// BaseScore so the tuner can tune mobMG/EG directly.
-var tunerDisableMobility bool
-
 // evaluate returns the static score for the current position from the
 // perspective of the side to move.  Positive = better for the mover.
 // Before calculating eval score, it tries to find it in the eval hashtable.
@@ -241,10 +224,8 @@ func eval_internal(p *Pos, shouldReport bool, ss *SearchState) int {
 	evaluateKing(p, &e, White)
 	evaluateKing(p, &e, Black)
 	// Threats use the fully-built attack maps from all evaluators above.
-	if !tunerDisableThreats {
-		evaluateThreats(p, &e, White)
-		evaluateThreats(p, &e, Black)
-	}
+	evaluateThreats(p, &e, White)
+	evaluateThreats(p, &e, Black)
 
 	// Interpolate between game phases
 	mg := e.sumMg(White) - e.sumMg(Black)
@@ -332,6 +313,10 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 	occForBishop := occ ^ (p.pieceBB(side, B) | p.pieceBB(side, Q))
 	occForRook := occ ^ (p.pieceBB(side, R) | p.pieceBB(side, Q))
 	occForQueen := occ ^ (p.pieceBB(side, B) | p.pieceBB(side, R))
+
+	// NOTE: this is buggy, because queen can move along different
+	// lines, and we make bishops transparent for a queen moving
+	// like a rook, yet I dod not manage to tune it away.
 
 	// Bishop eval
 	pieces = p.pieceBB(side, B)
@@ -659,9 +644,6 @@ func evaluatePassers(p *Pos, e *EvalData, side int) {
 // and the two adjacent files.  Missing pawns and open/semi-open files
 // near the king are penalised.
 func pawnShieldMG(p *Pos, side int) int {
-	if tunerDisableKingSafety {
-		return 0
-	}
 	kSq := p.kingSq[side]
 	kFile := fileOf(kSq)
 	kRank := rankOf(kSq)
@@ -715,10 +697,6 @@ func evaluateKing(p *Pos, e *EvalData, side int) {
 	sq := p.kingSq[side]
 	addPST(e, side, K, sq)
 	e.addAttacks(side, K, kingAtk[sq])
-
-	if tunerDisableKingSafety {
-		return
-	}
 
 	// King-attack danger: pressure accumulated by the *enemy* on our
 	// king ring.  We only trigger this when at least two distinct pieces

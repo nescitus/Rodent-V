@@ -1,13 +1,9 @@
 package main
 
 // --- Eval params ---
-var pieceValMG = [7]int{96, 361, 374, 502, 1018, 0, 0}
-var pieceValEG = [7]int{140, 454, 476, 806, 1565, 0, 0}
 
-/*
 var pieceValMG = [7]int{88, 336, 344, 461, 938, 0, 0}
 var pieceValEG = [7]int{135, 447, 463, 787, 1534, 0, 0}
-*/
 
 // bishopPairMG/EG: bonus for owning both bishops.
 // The EG value is higher because open boards in the endgame
@@ -88,6 +84,8 @@ var theirPasserProximityEG = [8]int{-38, -56, -13, 23, 66, 81, 90, 81}
 // Indexed P=0..Q=4; pawns and kings are handled separately.
 var kingAttackerWeight = [6]int{0, 65, 78, 44, -29, 0}
 
+// King-safety weights used in evaluateKing.
+// These are package-level vars so the tuner can read/write them.
 // King-safety weights used in evaluateKing.
 // These are package-level vars so the tuner can read/write them.
 var (
