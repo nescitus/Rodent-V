@@ -646,11 +646,11 @@ func evaluatePassers(p *Pos, e *EvalData, side int) {
 func pawnShieldMG(p *Pos, side int) int {
 	kSq := p.kingSq[side]
 	kFile := fileOf(kSq)
-	kRank := rankOf(kSq)
 
 	ownPawns := p.pieceBB(side, P)
 	enemyPawns := p.pieceBB(opp(side), P)
 
+	// info depth 30 seldepth 43 multipv 1 time 127349 nodes 134613308 nps 1057042 hashfull 1000 score cp 41 pv e2e4 c7c5 g1f3 e
 	penalty := 0
 
 	for df := -1; df <= 1; df++ {
@@ -658,31 +658,62 @@ func pawnShieldMG(p *Pos, side int) int {
 		if f < 0 || f > 7 {
 			continue
 		}
+
 		fileMask := fileABB << uint(f)
 
-		// Ranks immediately in front of the king (r1 closer, r2 further).
-		var r1, r2 int
+		// Ranks immediately in front of the king (r2 closer, r3 further).
+		var r2, r3, r4, r5, r6, r7 int
 		if side == White {
-			r1, r2 = kRank+1, kRank+2
+			r2, r3, r4, r5, r6, r7 = rankOf(A2), rankOf(A3), rankOf(A4), rankOf(A5), rankOf(A6), rankOf(A7)
 		} else {
-			r1, r2 = kRank-1, kRank-2
+			r2, r3, r4, r5, r6, r7 = rankOf(A7), rankOf(A6), rankOf(A5), rankOf(A4), rankOf(A3), rankOf(A2)
 		}
 
-		hasPawnR1 := r1 >= 0 && r1 <= 7 && ownPawns&squareBit(makeSquare(f, r1)) != 0
-		hasPawnR2 := r2 >= 0 && r2 <= 7 && ownPawns&squareBit(makeSquare(f, r2)) != 0
+		hasPawnR2 := ownPawns&squareBit(makeSquare(f, r2)) != 0
+		hasPawnR3 := ownPawns&squareBit(makeSquare(f, r3)) != 0
+		hasPawnR4 := ownPawns&squareBit(makeSquare(f, r4)) != 0
+		hasPawnR5 := ownPawns&squareBit(makeSquare(f, r5)) != 0
+		hasPawnR6 := ownPawns&squareBit(makeSquare(f, r6)) != 0
+		hasPawnR7 := ownPawns&squareBit(makeSquare(f, r7)) != 0
 
-		if !hasPawnR1 && !hasPawnR2 {
-			penalty += shieldMissing // no shield pawn at all
-		} else if !hasPawnR1 {
-			penalty += shieldAdvanced // pawn advanced one step
+		hasEnemyR3 := enemyPawns&squareBit(makeSquare(f, r3)) != 0
+		hasEnemyR4 := enemyPawns&squareBit(makeSquare(f, r4)) != 0
+		hasEnemyR5 := enemyPawns&squareBit(makeSquare(f, r5)) != 0
+
+		// pawns protecting the king should not advance,
+		// so they are penalized for it
+		if hasPawnR2 {
+			penalty -= 2
+		} else if hasPawnR3 {
+			penalty += 6				
+		} else if hasPawnR4 {
+			penalty += 11
+		} else if hasPawnR5 {
+			penalty += 14
+		} else if hasPawnR6 {
+			penalty += 10
+		} else if hasPawnR7 {
+			penalty += 10
+		} else {
+			penalty += 37
 		}
 
-		// Additional penalty for open / semi-open files through the king zone.
-		if fileMask&ownPawns == 0 {
+		// king's file penalty is bigger
+		if fileMask & p.pieceBB(side, K) > 0 {
+			penalty *= 12
+			penalty /= 10
+		}
+
+		// penalty for enemy pawns storming our king's position
+		if hasEnemyR3 {
+			penalty += 10				
+		} else if hasEnemyR4 {
+			penalty += 8
+		} else if hasEnemyR5 {
+			penalty += 3
+		} else {
 			if fileMask&enemyPawns == 0 {
-				penalty += shieldOpenFile // open file
-			} else {
-				penalty += shieldSemiOpen // semi-open file
+				penalty += 11
 			}
 		}
 	}

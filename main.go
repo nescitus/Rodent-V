@@ -83,7 +83,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "tune":
-			ctTune("d:/epd/lichess-sym.epd", 400, 0.25, 0)
+			ctTune("d:/epd/E12.33-1M-D12-Resolved.book", 100, 0.25, 0.25)
 			return
 		case "tunefile":
 			if len(os.Args) < 3 {

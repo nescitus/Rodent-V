@@ -36,8 +36,8 @@ import (
 // Please note that we try to keep pst tables
 // near 0, and as a compensation we change
 // material values.
-var tuneMaterial bool = true
-var tunePST bool = false
+var tuneMaterial bool = false
+var tunePST bool = true
 var tuneMobility bool = false
 var tunePassers bool = false
 var tunePhalanx bool = false
