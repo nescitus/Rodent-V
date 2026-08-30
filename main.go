@@ -175,6 +175,31 @@ func main() {
 			}
 			runRescoreText(inputFile, outputFile, nodesPerPos, numThreads, netFile)
 			return
+
+		case "filter_aggressive":
+			if len(os.Args) < 3 {
+				fmt.Println("usage: rodent_v filter_aggressive <input.txt> [output.txt] [mode: 9|10|all] [threads]")
+				return
+			}
+			inputFile := os.Args[2]
+			outputFile := ""
+			mode := "all"
+			numThreads := runtime.NumCPU()
+
+			if len(os.Args) > 3 && os.Args[3] != "" {
+				outputFile = os.Args[3]
+			}
+			if len(os.Args) > 4 && os.Args[4] != "" {
+				mode = os.Args[4]
+			}
+			if len(os.Args) > 5 && os.Args[5] != "" {
+				t, err := strconv.Atoi(os.Args[5])
+				if err == nil && t > 0 {
+					numThreads = t
+				}
+			}
+			runAggressiveFilter(inputFile, outputFile, mode, numThreads)
+			return
 		case "alloptions":
 			// Engine will hide personality path and print UCI options.
 			// No return statement, we want to use Rodent like that!
