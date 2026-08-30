@@ -3,7 +3,7 @@
 ; entirely NNUE-based, using net trained by Naman Thanki
 ; opening book missing
 ;
-setoption name nnuePath value nets/rodent_tal_512hl.bin
+setoption name nnuePath value nets/rodent_4kb_768hl_tal_aggressive.bin
 setoption name mainBookPath value books/ph-tal2.bin
 setoption name guideBookPath value books/empty.bin
 setoption name hceWeight value 0

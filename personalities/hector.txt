@@ -1,10 +1,10 @@
-; Rodent V - default settings
+; Rodent V - Hector is for HCE (handcrafted evaluation)
 ;
 setoption name nnuePath value nets/rodent_4kb_768hl_8ob_v2.bin
 setoption name mainBookPath value books/rodent.bin
 setoption name guideBookPath value books/empty.bin
-setoption name hceWeight value 0
-setoption name nnueWeight value 100
+setoption name hceWeight value 100
+setoption name nnueWeight value 0
 setoption name nnueScale value 206
 setoption name likesClosed value 0
 setoption name kingTropism value 0

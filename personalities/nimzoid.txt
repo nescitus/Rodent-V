@@ -7,13 +7,13 @@
 ; openings and likes to figure them out by himself.
 ; based on an old net, horizontal mirrorring must be off
 ;
-setoption name nnuePath value nets/rodent_v_512hl_6.bin
+setoption name nnuePath value nets/rodent_4kb_768hl_8ob_v2.bin
 setoption name mainBookPath value books/nimzowitsch.bin
 setoption name guideBookPath value books/empty.bin
 setoption name hceWeight value 60
 setoption name nnueWeight value 30
-setoption name horizontalMirroring value 0
-setoption name nnueScale value 400
+setoption name horizontalMirroring value 1
+setoption name nnueScale value 206
 setoption name likesClosed value 100
 setoption name kingTropism value 0
 setoption name forwardness value 0

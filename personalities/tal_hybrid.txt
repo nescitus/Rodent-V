@@ -2,12 +2,12 @@
 ;
 ; created by Naman Thanki, tweaked by Pawel Koziol
 ;
-setoption name nnuePath value nets/rodent_hm_512hl_1.bin
+setoption name nnuePath value nets/rodent_4kb_768hl_8ob_v2.bin
 setoption name mainBookPath value books/active.bin
 setoption name guideBookPath value books/empty.bin
 setoption name hceWeight value 80
 setoption name nnueWeight value 40
-setoption name nnueScale value 400
+setoption name nnueScale value 206
 setoption name horizontalMirroring value 1
 setoption name likesClosed value -100
 setoption name kingTropism value 100
