@@ -104,23 +104,6 @@ func init() {
 	initPawnHash(64 * 128)
 }
 
-// tunerDisableKingSafety: when true, evaluateKing skips the danger
-// calculation and pawnShieldMG returns 0, so the tuner's BaseScore
-// excludes king safety (the tuner adds it back via its own parameters).
-var tunerDisableKingSafety bool
-
-// tunerDisableThreats: when true, evaluateThreats is skipped so the
-// tuner's BaseScore excludes threats (added back via tuner parameters).
-var tunerDisableThreats bool
-
-// tunerDisableMaterial: when true, piece value scores are excluded from
-// BaseScore so the tuner can tune pieceValMG/EG directly.
-var tunerDisableMaterial bool
-
-// tunerDisableMobility: when true, mobility scores are excluded from
-// BaseScore so the tuner can tune mobMG/EG directly.
-var tunerDisableMobility bool
-
 // evaluate returns the static score for the current position from the
 // perspective of the side to move.  Positive = better for the mover.
 // Before calculating eval score, it tries to find it in the eval hashtable.
@@ -241,10 +224,8 @@ func eval_internal(p *Pos, shouldReport bool, ss *SearchState) int {
 	evaluateKing(p, &e, White)
 	evaluateKing(p, &e, Black)
 	// Threats use the fully-built attack maps from all evaluators above.
-	if !tunerDisableThreats {
-		evaluateThreats(p, &e, White)
-		evaluateThreats(p, &e, Black)
-	}
+	evaluateThreats(p, &e, White)
+	evaluateThreats(p, &e, Black)
 
 	// Interpolate between game phases
 	mg := e.sumMg(White) - e.sumMg(Black)
@@ -313,8 +294,8 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		e.addAttacks(side, N, atks)
 
 		// knight mobility
-		mob := popCount(atks&^p.colorBB[side]) - mobOffset[N]
-		add(e, side, EvalMobility, mobMG[N]*mob, mobEG[N]*mob)
+		mob := popCount(atks&^p.colorBB[side])
+		add(e, side, EvalMobility, nMobMg[mob], nMobEg[mob])
 
 		// knight attacks enemy king
 		if ringAtks := atks & enemyRing; ringAtks != 0 {
@@ -332,6 +313,10 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 	occForBishop := occ ^ (p.pieceBB(side, B) | p.pieceBB(side, Q))
 	occForRook := occ ^ (p.pieceBB(side, R) | p.pieceBB(side, Q))
 	occForQueen := occ ^ (p.pieceBB(side, B) | p.pieceBB(side, R))
+
+	// NOTE: this is buggy, because queen can move along different
+	// lines, and we make bishops transparent for a queen moving
+	// like a rook, yet I dod not manage to tune it away.
 
 	// Bishop eval
 	pieces = p.pieceBB(side, B)
@@ -355,8 +340,8 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		e.addAttacks(side, B, bishopAttacks(occ, sq))
 
 		// bishop mobility
-		mob := popCount(atks) - mobOffset[B]
-		add(e, side, EvalMobility, mobMG[B]*mob, mobEG[B]*mob)
+		mob := popCount(atks)
+		add(e, side, EvalMobility, bMobMg[mob], bMobEg[mob])
 
 		// bishop attacks enemy king
 		if ringAtks := atks & enemyRing; ringAtks != 0 {
@@ -392,8 +377,8 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		e.addAttacks(side, R, rookAttacks(occ, sq))
 
 		// rook mobility
-		mob := popCount(atks) - mobOffset[R]
-		add(e, side, EvalMobility, mobMG[R]*mob, mobEG[R]*mob)
+		mob := popCount(atks)
+		add(e, side, EvalMobility,rMobMg[mob], rMobEg[mob])
 
 		// Rook attacks enemy king.
 		if ringAtks := atks & enemyRing; ringAtks != 0 {
@@ -430,8 +415,8 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 		e.addAttacks(side, Q, queenAttacks(occ, sq))
 
 		// queen mobility
-		mob := popCount(atks) - mobOffset[Q]
-		add(e, side, EvalMobility, mobMG[Q]*mob, mobEG[Q]*mob)
+		mob := popCount(atks)
+		add(e, side, EvalMobility, qMobMg[mob], qMobEg[mob])
 
 		// queen attacks enemy king
 		if ringAtks := atks & enemyRing; ringAtks != 0 {
@@ -557,7 +542,7 @@ func evaluatePawns(p *Pos, e *EvalData, side int) {
 		}
 
 		// Pawn phalanx: two pawns standing side by side.
-		if shiftSides(b)&p.pieceBB(side, P) > 0 {
+		if shiftWest(b)&p.pieceBB(side, P) > 0 {
 			addPhalanx(e, side, sq)
 		}
 
@@ -659,16 +644,13 @@ func evaluatePassers(p *Pos, e *EvalData, side int) {
 // and the two adjacent files.  Missing pawns and open/semi-open files
 // near the king are penalised.
 func pawnShieldMG(p *Pos, side int) int {
-	if tunerDisableKingSafety {
-		return 0
-	}
 	kSq := p.kingSq[side]
 	kFile := fileOf(kSq)
-	kRank := rankOf(kSq)
 
 	ownPawns := p.pieceBB(side, P)
 	enemyPawns := p.pieceBB(opp(side), P)
 
+	// info depth 30 seldepth 43 multipv 1 time 127349 nodes 134613308 nps 1057042 hashfull 1000 score cp 41 pv e2e4 c7c5 g1f3 e
 	penalty := 0
 
 	for df := -1; df <= 1; df++ {
@@ -676,31 +658,62 @@ func pawnShieldMG(p *Pos, side int) int {
 		if f < 0 || f > 7 {
 			continue
 		}
+
 		fileMask := fileABB << uint(f)
 
-		// Ranks immediately in front of the king (r1 closer, r2 further).
-		var r1, r2 int
+		// Ranks immediately in front of the king (r2 closer, r3 further).
+		var r2, r3, r4, r5, r6, r7 int
 		if side == White {
-			r1, r2 = kRank+1, kRank+2
+			r2, r3, r4, r5, r6, r7 = rankOf(A2), rankOf(A3), rankOf(A4), rankOf(A5), rankOf(A6), rankOf(A7)
 		} else {
-			r1, r2 = kRank-1, kRank-2
+			r2, r3, r4, r5, r6, r7 = rankOf(A7), rankOf(A6), rankOf(A5), rankOf(A4), rankOf(A3), rankOf(A2)
 		}
 
-		hasPawnR1 := r1 >= 0 && r1 <= 7 && ownPawns&squareBit(makeSquare(f, r1)) != 0
-		hasPawnR2 := r2 >= 0 && r2 <= 7 && ownPawns&squareBit(makeSquare(f, r2)) != 0
+		hasPawnR2 := ownPawns&squareBit(makeSquare(f, r2)) != 0
+		hasPawnR3 := ownPawns&squareBit(makeSquare(f, r3)) != 0
+		hasPawnR4 := ownPawns&squareBit(makeSquare(f, r4)) != 0
+		hasPawnR5 := ownPawns&squareBit(makeSquare(f, r5)) != 0
+		hasPawnR6 := ownPawns&squareBit(makeSquare(f, r6)) != 0
+		hasPawnR7 := ownPawns&squareBit(makeSquare(f, r7)) != 0
 
-		if !hasPawnR1 && !hasPawnR2 {
-			penalty += shieldMissing // no shield pawn at all
-		} else if !hasPawnR1 {
-			penalty += shieldAdvanced // pawn advanced one step
+		hasEnemyR3 := enemyPawns&squareBit(makeSquare(f, r3)) != 0
+		hasEnemyR4 := enemyPawns&squareBit(makeSquare(f, r4)) != 0
+		hasEnemyR5 := enemyPawns&squareBit(makeSquare(f, r5)) != 0
+
+		// pawns protecting the king should not advance,
+		// so they are penalized for it
+		if hasPawnR2 {
+			penalty = shieldRank2
+		} else if hasPawnR3 {
+			penalty += shieldRank3				
+		} else if hasPawnR4 {
+			penalty += shieldRank4
+		} else if hasPawnR5 {
+			penalty += shieldRank5
+		} else if hasPawnR6 {
+			penalty += shieldRank6
+		} else if hasPawnR7 {
+			penalty += shieldRank7
+		} else {
+			penalty += shieldNoPawn
 		}
 
-		// Additional penalty for open / semi-open files through the king zone.
-		if fileMask&ownPawns == 0 {
+		// king's file penalty is bigger
+		if fileMask & p.pieceBB(side, K) > 0 {
+			penalty *= 12
+			penalty /= 10
+		}
+
+		// penalty for enemy pawns storming our king's position
+		if hasEnemyR3 {
+			penalty += stormRank3				
+		} else if hasEnemyR4 {
+			penalty += stormRank4
+		} else if hasEnemyR5 {
+			penalty += stormRank5
+		} else {
 			if fileMask&enemyPawns == 0 {
-				penalty += shieldOpenFile // open file
-			} else {
-				penalty += shieldSemiOpen // semi-open file
+				penalty += stormNoPawn
 			}
 		}
 	}
@@ -715,10 +728,6 @@ func evaluateKing(p *Pos, e *EvalData, side int) {
 	sq := p.kingSq[side]
 	addPST(e, side, K, sq)
 	e.addAttacks(side, K, kingAtk[sq])
-
-	if tunerDisableKingSafety {
-		return
-	}
 
 	// King-attack danger: pressure accumulated by the *enemy* on our
 	// king ring.  We only trigger this when at least two distinct pieces
