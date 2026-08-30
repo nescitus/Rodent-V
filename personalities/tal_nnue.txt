@@ -8,7 +8,7 @@ setoption name mainBookPath value books/ph-tal2.bin
 setoption name guideBookPath value books/empty.bin
 setoption name hceWeight value 0
 setoption name nnueWeight value 100
-setoption name nnueScale value 192
+setoption name nnueScale value 223
 setoption name horizontalMirroring value 1
 ;
 ; HCE stuff omitted
