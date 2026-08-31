@@ -110,10 +110,10 @@ func uciLoop() {
 			fmt.Println("option name UCI_Chess960 type check default false")
 			fmt.Println("option name UCI_LimitStrength type check default false")
 			fmt.Printf("option name UCI_Elo type spin default %d min 800 max 3000\n", engineElo)
+			fmt.Println("option name Threads type spin default 1 min 1 max 256")
 
 			if !noOptions {
 				fmt.Println("option name OwnBook type check default false")
-				fmt.Println("option name Threads type spin default 1 min 1 max 256")
 				fmt.Println("option name MultiPV type spin default 1 min 1 max 500")
 				printSingleOption(HcePerc)
 				printSingleOption(NnuePerc)
