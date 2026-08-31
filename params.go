@@ -2,14 +2,21 @@ package main
 
 // --- Eval params ---
 
-var pieceValMG = [7]int{88, 336, 344, 461, 938, 0, 0}
-var pieceValEG = [7]int{135, 447, 463, 787, 1534, 0, 0}
+var pieceValMG = [7]int{89, 337, 348, 461, 938, 0, 0}
+var pieceValEG = [7]int{135, 447, 464, 787, 1534, 0, 0}
 
 // bishopPairMG/EG: bonus for owning both bishops.
 // The EG value is higher because open boards in the endgame
 // let the bishop pair dominate knight+bishop or two knights.
 var bishopPairMG = 26
 var bishopPairEG = 59
+var rookPairMG = -4
+var rookPairEG = -14
+var exchangePlusEG = 9
+var exchangePlusMG = 12
+var twoMinorsMG = 20
+var twoMinorsEG = -20
+var np = 1
 
 // mobility
 var nMobMg = [9]int {-12,  -9,  -6,  -3,   0,   3,   6,   9,  12}
@@ -217,8 +224,8 @@ var pstMG = [6][64]int{
                  -38,  -58,  -12,  -69,  -69,  -15,  -41,  -65,
         },
         R: {
-                 -20,  -20,  -18,  -11,   -9,   -5,    5,   -9,
-                 -28,  -29,  -21,  -18,  -12,   -3,    5,  -12,
+                 -20,  -20,  -17,   -4,    4    -5,    1,  -10,
+                 -28,  -29,  -21,  -18,  -12,   -3,    4,  -13,
                  -30,  -26,  -25,  -21,  -10,   -5,   17,    8,
                  -25,  -20,  -18,  -11,   -6,   -8,   20,    2,
                   -5,   -4,    6,    3,    8,   24,   22,    5,
@@ -237,7 +244,7 @@ var pstMG = [6][64]int{
                  -10,  -21,    8,   12,   -8,   28,   10,   -6,
         },
         K: {
-                  34,   82,   67,   -8,   49,    6,   68,   45,
+                  34,   82,   67,   -8,   45,    6,   68,   45,
                   52,   50,   40,   11,    9,   27,   58,   48,
                  -31,   17,   -1,   -9,   -3,    5,   23,  -24,
                  -98,  -31,    5,  -47,  -33,  -38,  -51, -140,
@@ -285,7 +292,7 @@ var pstEG = [6][64]int{
                   11,    5,    7,    5,    0,    3,  -20,  -11,
                   12,   10,    7,    4,   -7,  -12,  -10,   -5,
                   10,    1,    8,   -2,  -16,  -16,  -25,  -20,
-                  14,   24,   25,   17,   16,    9,    4,   -9,
+                  14,   24,   25,   17,   16,    9,    4,   -8,
                   17,   26,   24,   25,   20,   21,   14,    9,
         },
         Q: {

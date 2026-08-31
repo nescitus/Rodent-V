@@ -227,6 +227,27 @@ func eval_internal(p *Pos, shouldReport bool, ss *SearchState) int {
 	evaluateThreats(p, &e, White)
 	evaluateThreats(p, &e, Black)
 
+	wMinors := p.count[White][N] + p.count[White][B]
+	bMinors := p.count[Black][N] + p.count[Black][B]
+	wMajors := p.count[White][R] + 2 * p.count[White][Q]
+	bMajors :=  p.count[Black][R] + 2 * p.count[Black][Q]
+
+	if wMajors == bMajors+1 && wMinors == bMinors-1 {
+		add(&e, White, EvalMaterial, exchangePlusMG, exchangePlusEG)
+	}
+	
+	if bMajors == wMajors+1 && bMinors == wMinors-1 {
+		add(&e, Black, EvalMaterial, exchangePlusMG, exchangePlusEG)
+	}
+
+	if wMajors == bMajors-1 && wMinors == bMinors+2 {
+		add(&e, White, EvalMaterial, twoMinorsMG, twoMinorsEG)
+	}
+
+	if bMajors == wMajors-1 && bMinors == wMinors+2 {
+		add(&e, Black, EvalMaterial, twoMinorsMG, twoMinorsEG)
+	}
+
 	// Interpolate between game phases
 	mg := e.sumMg(White) - e.sumMg(Black)
 	eg := e.sumEg(White) - e.sumEg(Black)
@@ -321,7 +342,7 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 	// Bishop eval
 	pieces = p.pieceBB(side, B)
 	if popCount(pieces) >= 2 {
-		add(e, side, EvalOther, bishopPairMG, bishopPairEG)
+		add(e, side, EvalMaterial, bishopPairMG, bishopPairEG)
 	}
 	for pieces != 0 {
 		sq := lsb(pieces)
@@ -365,6 +386,9 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 
 	// Rook eval
 	pieces = p.pieceBB(side, R)
+	if popCount(pieces) >= 2 {
+		add(e, side, EvalMaterial, rookPairMG, rookPairEG)
+	}
 	for pieces != 0 {
 		sq := lsb(pieces)
 
