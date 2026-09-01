@@ -52,11 +52,13 @@ var tunePST bool = false
 var tuneMobility bool = false
 var tunePassers bool = false
 var tunePhalanx bool = false
-var tuneAdjustments bool = false
+var tuneAdjustments bool = true
 var tuneShield bool = false
-var tunePawnWeaknesses bool = true
+var tunePawnWeaknesses bool = false
 
 type ctPair [2]float64
+
+const ctAdjustSquares = 48 // relative ranks 1..6; ranks 7..8 are fixed at zero
 
 type ctCoeff struct {
 	index uint16
@@ -100,9 +102,9 @@ type ctLayout struct {
 	phalanx   int // 64
 
 	// Center-pattern adjustment tables (MG-only)
-	pawnAdjust   int // len(pawnAdjust)*2*64
-	knightAdjust int // len(knightAdjust)*2*64
-	bishopAdjust int // len(bishopAdjust)*2*64
+	pawnAdjust   int // len(pawnAdjust)*2*ctAdjustSquares
+	knightAdjust int // len(knightAdjust)*2*ctAdjustSquares
+	bishopAdjust int // len(bishopAdjust)*2*ctAdjustSquares
 
 	// King pawn shield / pawn storm (MG-only).
 	shield   int // 11 entries
@@ -207,9 +209,9 @@ func ctMakeLayout() ctLayout {
 	l.phalanx = l.theirProx + 8
 
 	l.pawnAdjust = l.phalanx + 64
-	l.knightAdjust = l.pawnAdjust + len(pawnAdjust)*2*64
-	l.bishopAdjust = l.knightAdjust + len(knightAdjust)*2*64
-	l.shield = l.bishopAdjust + len(bishopAdjust)*2*64
+	l.knightAdjust = l.pawnAdjust + len(pawnAdjust)*2*ctAdjustSquares
+	l.bishopAdjust = l.knightAdjust + len(knightAdjust)*2*ctAdjustSquares
+	l.shield = l.bishopAdjust + len(bishopAdjust)*2*ctAdjustSquares
 	l.pawnWeak = l.shield + 11
 	l.num = l.pawnWeak + 8
 
@@ -339,28 +341,41 @@ func ctInitParams(l ctLayout) []ctPair {
 		}
 	}
 
-	// Center-pattern adjustments are MG-only. EG stays exactly zero.
+	// Center-pattern adjustments are MG-only. Only relative ranks 1..6 are stored;
+	// relative ranks 7..8 are fixed at zero. EG stays exactly zero.
 	for center := 0; center < len(pawnAdjust); center++ {
 		for side := White; side <= Black; side++ {
-			for sq := 0; sq < 64; sq++ {
-				i := l.pawnAdjust + (center*2+side)*64 + sq
-				p[i] = ctPair{float64(pawnAdjust[center][side][sq]), 0}
+			for canonicalSq := 0; canonicalSq < ctAdjustSquares; canonicalSq++ {
+				engineSq := canonicalSq
+				if side == Black {
+					engineSq ^= 56
+				}
+				i := l.pawnAdjust + (center*2+side)*ctAdjustSquares + canonicalSq
+				p[i] = ctPair{float64(pawnAdjust[center][side][engineSq]), 0}
 			}
 		}
 	}
 	for center := 0; center < len(knightAdjust); center++ {
 		for side := White; side <= Black; side++ {
-			for sq := 0; sq < 64; sq++ {
-				i := l.knightAdjust + (center*2+side)*64 + sq
-				p[i] = ctPair{float64(knightAdjust[center][side][sq]), 0}
+			for canonicalSq := 0; canonicalSq < ctAdjustSquares; canonicalSq++ {
+				engineSq := canonicalSq
+				if side == Black {
+					engineSq ^= 56
+				}
+				i := l.knightAdjust + (center*2+side)*ctAdjustSquares + canonicalSq
+				p[i] = ctPair{float64(knightAdjust[center][side][engineSq]), 0}
 			}
 		}
 	}
 	for center := 0; center < len(bishopAdjust); center++ {
 		for side := White; side <= Black; side++ {
-			for sq := 0; sq < 64; sq++ {
-				i := l.bishopAdjust + (center*2+side)*64 + sq
-				p[i] = ctPair{float64(bishopAdjust[center][side][sq]), 0}
+			for canonicalSq := 0; canonicalSq < ctAdjustSquares; canonicalSq++ {
+				engineSq := canonicalSq
+				if side == Black {
+					engineSq ^= 56
+				}
+				i := l.bishopAdjust + (center*2+side)*ctAdjustSquares + canonicalSq
+				p[i] = ctPair{float64(bishopAdjust[center][side][engineSq]), 0}
 			}
 		}
 	}
@@ -400,6 +415,20 @@ func ctPhase(pos *Pos) int {
 		phase = 24
 	}
 	return phase
+}
+
+// Center adjustments tune only relative ranks 1..6.
+// Black squares are mirrored to White's orientation before indexing.
+// Relative ranks 7..8 are fixed zero and are not parameters at all.
+func ctAdjustIndex(base, center, side, sq int) (int, bool) {
+	canonicalSq := sq
+	if side == Black {
+		canonicalSq ^= 56
+	}
+	if canonicalSq < 0 || canonicalSq >= ctAdjustSquares {
+		return 0, false
+	}
+	return base + (center*2+side)*ctAdjustSquares + canonicalSq, true
 }
 
 // Shield/storm offsets inside l.shield.
@@ -630,8 +659,9 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 
 			if centerEval.center[side] != Undefined {
 				center := int(centerEval.center[side])
-				idx := l.pawnAdjust + (center*2+side)*64 + sq
-				addCoeff(idx, sign)
+				if idx, ok := ctAdjustIndex(l.pawnAdjust, center, side, sq); ok {
+					addCoeff(idx, sign)
+				}
 			}
 
 			// Pawn weaknesses: mirror evaluatePawns() exactly.
@@ -710,8 +740,9 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 
 			if centerEval.center[side] != Undefined {
 				center := int(centerEval.center[side])
-				idx := l.knightAdjust + (center*2+side)*64 + sq
-				addCoeff(idx, sign)
+				if idx, ok := ctAdjustIndex(l.knightAdjust, center, side, sq); ok {
+					addCoeff(idx, sign)
+				}
 			}
 
 			atks := knightAtk[sq]
@@ -740,8 +771,9 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 
 			if centerEval.center[side] != Undefined {
 				center := int(centerEval.center[side])
-				idx := l.bishopAdjust + (center*2+side)*64 + sq
-				addCoeff(idx, sign)
+				if idx, ok := ctAdjustIndex(l.bishopAdjust, center, side, sq); ok {
+					addCoeff(idx, sign)
+				}
 			}
 
 			cnt := popCount(bishopAttacks(occForBishop, sq))
@@ -1573,10 +1605,14 @@ func ctPrintNamedAdjustTable(name string, n []ctPair, start, center int) {
 			}
 
 			sq := rank*8 + file
-			whiteIdx := start + (center*2+White)*64 + sq
-			blackIdx := start + (center*2+Black)*64 + (sq ^ 56)
+			v := 0.0
 
-			v := (n[whiteIdx][0] + n[blackIdx][0]) / 2.0
+			if sq < ctAdjustSquares {
+				whiteIdx := start + (center*2+White)*ctAdjustSquares + sq
+				blackIdx := start + (center*2+Black)*ctAdjustSquares + sq
+				v = (n[whiteIdx][0] + n[blackIdx][0]) / 2.0
+			}
+
 			fmt.Printf("%4d", ctRound(v))
 		}
 		fmt.Println(",")
