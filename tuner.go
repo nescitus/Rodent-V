@@ -6,6 +6,8 @@ package main
 // Tunes ONLY:
 //   - material P..Q
 //   - bishop pair
+//   - rook pair
+//   - material imbalances: exchangePlus and twoMinors
 //   - main PSTs P..K
 //   - mobility lookup tables: nMobMg/Eg, bMobMg/Eg, rMobMg/Eg, qMobMg/Eg
 //   - passedBonusMG/EG[blocked][relative rank]
@@ -13,6 +15,7 @@ package main
 //   - theirPasserProximityMG/EG
 //   - phalanxMG/EG[64] (one value per phalanx pair)
 //   - pawnAdjust / knightAdjust / bishopAdjust center-pattern tables (MG only)
+//   - king pawn shield / enemy pawn storm terms (MG only)
 //
 // Everything else is frozen from the CURRENT eval_internal().
 //
@@ -49,7 +52,9 @@ var tunePST bool = false
 var tuneMobility bool = false
 var tunePassers bool = false
 var tunePhalanx bool = false
-var tuneAdjustments bool = true
+var tuneAdjustments bool = false
+var tuneShield bool = false
+var tunePawnWeaknesses bool = true
 
 type ctPair [2]float64
 
@@ -65,6 +70,9 @@ type ctEntry struct {
 	phase      uint8   // game phase for linear interpolation
 	coeffStart uint32  // Start index of this position's sparse coefficient list in ctDataset.coeffs.
 	coeffCount uint16  // number of sparse coefficients in this position
+
+	// Packed branch decisions for pawnShieldMG(), one byte per relevant file.
+	shieldDesc [2][3]uint8
 }
 
 type ctDataset struct {
@@ -81,7 +89,10 @@ type ctLayout struct {
 	rMob int
 	qMob int
 
-	bishopPair int
+	bishopPair   int
+	rookPair     int
+	exchangePlus int
+	twoMinors    int
 
 	passed    int // 2*8
 	ourProx   int // 8
@@ -93,16 +104,22 @@ type ctLayout struct {
 	knightAdjust int // len(knightAdjust)*2*64
 	bishopAdjust int // len(bishopAdjust)*2*64
 
+	// King pawn shield / pawn storm (MG-only).
+	shield   int // 11 entries
+	pawnWeak int // 8 entries: isolated, isolatedOpen, backward, backwardOpen, doubled[4]
+
 	num int
 }
 
 type ctTuneMask struct {
-	material    bool
-	pst         bool
-	mobility    bool
-	passers     bool
-	phalanx     bool
-	adjustments bool
+	material     bool
+	pst          bool
+	mobility     bool
+	passers      bool
+	phalanx      bool
+	adjustments  bool
+	shield       bool
+	pawnWeakness bool
 }
 
 func ctParamEnabled(i int, l ctLayout, mask ctTuneMask) bool {
@@ -113,14 +130,18 @@ func ctParamEnabled(i int, l ctLayout, mask ctTuneMask) bool {
 		return mask.pst
 	case i >= l.nMob && i < l.bishopPair:
 		return mask.mobility
-	case i == l.bishopPair:
+	case i >= l.bishopPair && i < l.passed:
 		return mask.material
 	case i >= l.passed && i < l.phalanx:
 		return mask.passers
 	case i >= l.phalanx && i < l.pawnAdjust:
 		return mask.phalanx
-	case i >= l.pawnAdjust && i < l.num:
+	case i >= l.pawnAdjust && i < l.shield:
 		return mask.adjustments
+	case i >= l.shield && i < l.pawnWeak:
+		return mask.shield
+	case i >= l.pawnWeak && i < l.num:
+		return mask.pawnWeakness
 	default:
 		return false
 	}
@@ -136,13 +157,16 @@ func ctCountEnabled(l ctLayout, mask ctTuneMask) int {
 	return n
 }
 
-// ctParamPhaseEnabled is like ctParamEnabled, but adjustment tables are
-// MG-only in the engine, so their EG half must never be optimized.
+// ctParamPhaseEnabled is like ctParamEnabled, but adjustment tables and
+// shield/storm terms are MG-only in the engine, so their EG half is disabled.
 func ctParamPhaseEnabled(i, ph int, l ctLayout, mask ctTuneMask) bool {
 	if !ctParamEnabled(i, l, mask) {
 		return false
 	}
-	if i >= l.pawnAdjust && ph == 1 {
+	if i >= l.pawnAdjust && i < l.pawnWeak && ph == 1 {
+		return false
+	}
+	if ph == 1 && (i == l.pawnWeak+ctWeakIsolatedOpen || i == l.pawnWeak+ctWeakBackwardOpen) {
 		return false
 	}
 	return true
@@ -173,8 +197,11 @@ func ctMakeLayout() ctLayout {
 	l.qMob = l.rMob + len(rMobMg)
 
 	l.bishopPair = l.qMob + len(qMobMg)
+	l.rookPair = l.bishopPair + 1
+	l.exchangePlus = l.rookPair + 1
+	l.twoMinors = l.exchangePlus + 1
 
-	l.passed = l.bishopPair + 1
+	l.passed = l.twoMinors + 1
 	l.ourProx = l.passed + 16
 	l.theirProx = l.ourProx + 8
 	l.phalanx = l.theirProx + 8
@@ -182,7 +209,9 @@ func ctMakeLayout() ctLayout {
 	l.pawnAdjust = l.phalanx + 64
 	l.knightAdjust = l.pawnAdjust + len(pawnAdjust)*2*64
 	l.bishopAdjust = l.knightAdjust + len(knightAdjust)*2*64
-	l.num = l.bishopAdjust + len(bishopAdjust)*2*64
+	l.shield = l.bishopAdjust + len(bishopAdjust)*2*64
+	l.pawnWeak = l.shield + 11
+	l.num = l.pawnWeak + 8
 
 	if l.num > 65535 {
 		panic("ct tuner: parameter count exceeds uint16 index range")
@@ -270,6 +299,18 @@ func ctInitParams(l ctLayout) []ctPair {
 		float64(bishopPairMG),
 		float64(bishopPairEG),
 	}
+	p[l.rookPair] = ctPair{
+		float64(rookPairMG),
+		float64(rookPairEG),
+	}
+	p[l.exchangePlus] = ctPair{
+		float64(exchangePlusMG),
+		float64(exchangePlusEG),
+	}
+	p[l.twoMinors] = ctPair{
+		float64(twoMinorsMG),
+		float64(twoMinorsEG),
+	}
 
 	for blocked := 0; blocked < 2; blocked++ {
 		for rank := 0; rank < 8; rank++ {
@@ -324,6 +365,27 @@ func ctInitParams(l ctLayout) []ctPair {
 		}
 	}
 
+	// Pawn shield / storm parameters are MG-only.
+	p[l.shield+0] = ctPair{float64(shieldRank2), 0}
+	p[l.shield+1] = ctPair{float64(shieldRank3), 0}
+	p[l.shield+2] = ctPair{float64(shieldRank4), 0}
+	p[l.shield+3] = ctPair{float64(shieldRank5), 0}
+	p[l.shield+4] = ctPair{float64(shieldRank6), 0}
+	p[l.shield+5] = ctPair{float64(shieldRank7), 0}
+	p[l.shield+6] = ctPair{float64(shieldNoPawn), 0}
+	p[l.shield+7] = ctPair{float64(stormRank3), 0}
+	p[l.shield+8] = ctPair{float64(stormRank4), 0}
+	p[l.shield+9] = ctPair{float64(stormRank5), 0}
+	p[l.shield+10] = ctPair{float64(stormNoPawn), 0}
+
+	p[l.pawnWeak+ctWeakIsolated] = ctPair{float64(isolatedMG), float64(isolatedEG)}
+	p[l.pawnWeak+ctWeakIsolatedOpen] = ctPair{float64(isolatedOpenMG), 0}
+	p[l.pawnWeak+ctWeakBackward] = ctPair{float64(backwardMG), float64(backwardEG)}
+	p[l.pawnWeak+ctWeakBackwardOpen] = ctPair{float64(backwardOpenMG), 0}
+	for i := 0; i < 4; i++ {
+		p[l.pawnWeak+ctWeakDoubledA+i] = ctPair{float64(doubledPawnMG[i]), float64(doubledPawnEG[i])}
+	}
+
 	return p
 }
 
@@ -338,6 +400,185 @@ func ctPhase(pos *Pos) int {
 		phase = 24
 	}
 	return phase
+}
+
+// Shield/storm offsets inside l.shield.
+const (
+	ctShieldR2 = iota
+	ctShieldR3
+	ctShieldR4
+	ctShieldR5
+	ctShieldR6
+	ctShieldR7
+	ctShieldNone
+	ctStormR3
+	ctStormR4
+	ctStormR5
+	ctStormNone
+)
+
+const (
+	ctWeakIsolated = iota
+	ctWeakIsolatedOpen
+	ctWeakBackward
+	ctWeakBackwardOpen
+	ctWeakDoubledA
+	ctWeakDoubledB
+	ctWeakDoubledC
+	ctWeakDoubledD
+)
+
+// ctMakeShieldDesc records the branch choices made by pawnShieldMG().
+func ctMakeShieldDesc(pos *Pos, side int) [3]uint8 {
+	var out [3]uint8
+
+	kFile := fileOf(pos.kingSq[side])
+	ownPawns := pos.pieceBB(side, P)
+	enemyPawns := pos.pieceBB(opp(side), P)
+
+	var r2, r3, r4, r5, r6, r7 int
+	if side == White {
+		r2, r3, r4, r5, r6, r7 = rankOf(A2), rankOf(A3), rankOf(A4), rankOf(A5), rankOf(A6), rankOf(A7)
+	} else {
+		r2, r3, r4, r5, r6, r7 = rankOf(A7), rankOf(A6), rankOf(A5), rankOf(A4), rankOf(A3), rankOf(A2)
+	}
+
+	slot := 0
+	for df := -1; df <= 1; df++ {
+		f := kFile + df
+		if f < 0 || f > 7 {
+			continue
+		}
+
+		ownCode := uint8(ctShieldNone)
+		switch {
+		case ownPawns&squareBit(makeSquare(f, r2)) != 0:
+			ownCode = ctShieldR2
+		case ownPawns&squareBit(makeSquare(f, r3)) != 0:
+			ownCode = ctShieldR3
+		case ownPawns&squareBit(makeSquare(f, r4)) != 0:
+			ownCode = ctShieldR4
+		case ownPawns&squareBit(makeSquare(f, r5)) != 0:
+			ownCode = ctShieldR5
+		case ownPawns&squareBit(makeSquare(f, r6)) != 0:
+			ownCode = ctShieldR6
+		case ownPawns&squareBit(makeSquare(f, r7)) != 0:
+			ownCode = ctShieldR7
+		}
+
+		// 7 = no storm term; 3 = stormNoPawn.
+		stormCode := uint8(7)
+		switch {
+		case enemyPawns&squareBit(makeSquare(f, r3)) != 0:
+			stormCode = 0
+		case enemyPawns&squareBit(makeSquare(f, r4)) != 0:
+			stormCode = 1
+		case enemyPawns&squareBit(makeSquare(f, r5)) != 0:
+			stormCode = 2
+		default:
+			fileMask := fileABB << uint(f)
+			if fileMask&enemyPawns == 0 {
+				stormCode = 3
+			}
+		}
+
+		d := ownCode | (stormCode << 4)
+		if f == kFile {
+			d |= 0x80
+		}
+		out[slot] = d
+		slot++
+	}
+
+	for ; slot < 3; slot++ {
+		out[slot] = 0x7f // unused edge slot
+	}
+	return out
+}
+
+// ctShieldScore is the differentiable equivalent of pawnShieldMG().
+// It preserves the current shieldRank2 assignment/reset and the cumulative
+// king-file scaling, using *1.2 instead of integer *12/10 truncation.
+func ctShieldScore(desc [3]uint8, params []ctPair, l ctLayout) float64 {
+	penalty := 0.0
+
+	for _, d := range desc {
+		if d == 0x7f {
+			continue
+		}
+
+		ownCode := int(d & 0x0f)
+		stormCode := int((d >> 4) & 0x07)
+
+		v := params[l.shield+ownCode][0]
+		if ownCode == ctShieldR2 {
+			penalty = v
+		} else {
+			penalty += v
+		}
+
+		if d&0x80 != 0 {
+			penalty *= 1.2
+		}
+
+		switch stormCode {
+		case 0:
+			penalty += params[l.shield+ctStormR3][0]
+		case 1:
+			penalty += params[l.shield+ctStormR4][0]
+		case 2:
+			penalty += params[l.shield+ctStormR5][0]
+		case 3:
+			penalty += params[l.shield+ctStormNone][0]
+		}
+	}
+
+	return -penalty
+}
+
+// Derivatives of ctShieldScore for one side.
+func ctShieldDeriv(desc [3]uint8) [11]float64 {
+	var g [11]float64
+
+	for _, d := range desc {
+		if d == 0x7f {
+			continue
+		}
+
+		ownCode := int(d & 0x0f)
+		stormCode := int((d >> 4) & 0x07)
+
+		if ownCode == ctShieldR2 {
+			for i := range g {
+				g[i] = 0
+			}
+			g[ctShieldR2] = 1
+		} else {
+			g[ownCode] += 1
+		}
+
+		if d&0x80 != 0 {
+			for i := range g {
+				g[i] *= 1.2
+			}
+		}
+
+		switch stormCode {
+		case 0:
+			g[ctStormR3] += 1
+		case 1:
+			g[ctStormR4] += 1
+		case 2:
+			g[ctStormR5] += 1
+		case 3:
+			g[ctStormNone] += 1
+		}
+	}
+
+	for i := range g {
+		g[i] = -g[i]
+	}
+	return g
 }
 
 // Sparse builder for one position.
@@ -391,6 +632,31 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 				center := int(centerEval.center[side])
 				idx := l.pawnAdjust + (center*2+side)*64 + sq
 				addCoeff(idx, sign)
+			}
+
+			// Pawn weaknesses: mirror evaluatePawns() exactly.
+			frontMask := fillForward(squareBit(sq), side)
+			isOpen := frontMask&ownPawns == 0
+
+			if adjFileMask[fileOf(sq)]&ownPawns == 0 {
+				addCoeff(l.pawnWeak+ctWeakIsolated, sign)
+				if isOpen {
+					addCoeff(l.pawnWeak+ctWeakIsolatedOpen, sign)
+				}
+			} else if supportMask[side][sq]&ownPawns == 0 {
+				addCoeff(l.pawnWeak+ctWeakBackward, sign)
+				if isOpen {
+					addCoeff(l.pawnWeak+ctWeakBackwardOpen, sign)
+				}
+			}
+
+			pushSqWeak := getPushSq(side, sq)
+			if pushSqWeak >= 0 && pushSqWeak < 64 && ownPawns&squareBit(pushSqWeak) != 0 {
+				fileIdx := fileOf(sq)
+				if fileIdx > 3 {
+					fileIdx = 7 - fileIdx
+				}
+				addCoeff(l.pawnWeak+ctWeakDoubledA+fileIdx, sign)
 			}
 
 			// Count each phalanx pair once: the eastern pawn represents the pair.
@@ -513,6 +779,10 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 			addCoeff(l.rMob+cnt, sign)
 		}
 
+		if popCount(pos.pieceBB(side, R)) >= 2 {
+			addCoeff(l.rookPair, sign)
+		}
+
 		// --------------------------------------------------------
 		// Queens
 		// --------------------------------------------------------
@@ -544,6 +814,25 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 		addCoeff(l.pst+K*64+pstSq, sign)
 	}
 
+	// Material imbalance corrections. Match eval_internal() exactly.
+	wMinors := pos.count[White][N] + pos.count[White][B]
+	bMinors := pos.count[Black][N] + pos.count[Black][B]
+	wMajors := pos.count[White][R] + 2*pos.count[White][Q]
+	bMajors := pos.count[Black][R] + 2*pos.count[Black][Q]
+
+	if wMajors == bMajors+1 && wMinors == bMinors-1 {
+		addCoeff(l.exchangePlus, 1)
+	}
+	if bMajors == wMajors+1 && bMinors == wMinors-1 {
+		addCoeff(l.exchangePlus, -1)
+	}
+	if wMajors == bMajors-1 && wMinors == bMinors+2 {
+		addCoeff(l.twoMinors, 1)
+	}
+	if bMajors == wMajors-1 && bMinors == wMinors+2 {
+		addCoeff(l.twoMinors, -1)
+	}
+
 	out = out[:0]
 	for i, v := range dense {
 		if v != 0 {
@@ -564,7 +853,7 @@ func ctLinDotRange(coeffs []ctCoeff, params []ctPair, l ctLayout) (mg, eg float6
 
 		mg += f * params[i][0]
 		// Center adjustment tables are MG-only in eval_internal().
-		if i < l.pawnAdjust {
+		if i < l.pawnAdjust || i >= l.pawnWeak {
 			eg += f * params[i][1]
 		}
 	}
@@ -588,6 +877,9 @@ func ctEntryCoeffs(data *ctDataset, e *ctEntry) []ctCoeff {
 
 func ctScore(data *ctDataset, e *ctEntry, params []ctPair, l ctLayout) float64 {
 	selected := ctSelectedScore(ctEntryCoeffs(data, e), params, int(e.phase), l)
+	shieldSelected := ctShieldScore(e.shieldDesc[White], params, l) -
+		ctShieldScore(e.shieldDesc[Black], params, l)
+	selected += shieldSelected * float64(e.phase) / 24.0
 	return e.frozen + e.scale*selected
 }
 
@@ -664,6 +956,13 @@ func ctLoadDataset(filename string, initParams []ctPair, l ctLayout) (*ctDataset
 		scale := ctLinearScale(&pos, phase, engineScore)
 
 		selected := ctSelectedScore(tmpCoeffs, initParams, phase, l)
+		shieldDesc := [2][3]uint8{
+			ctMakeShieldDesc(&pos, White),
+			ctMakeShieldDesc(&pos, Black),
+		}
+		shieldSelected := ctShieldScore(shieldDesc[White], initParams, l) -
+			ctShieldScore(shieldDesc[Black], initParams, l)
+		selected += shieldSelected * float64(phase) / 24.0
 		frozen := engineScore - scale*selected
 
 		start := len(data.coeffs)
@@ -676,6 +975,7 @@ func ctLoadDataset(filename string, initParams []ctPair, l ctLayout) (*ctDataset
 			phase:      uint8(phase),
 			coeffStart: uint32(start),
 			coeffCount: uint16(len(tmpCoeffs)),
+			shieldDesc: shieldDesc,
 		}
 
 		data.entries = append(data.entries, entry)
@@ -927,8 +1227,17 @@ func ctEpoch(
 					idx := int(c.index)
 					f := float64(c.value)
 					r.grad[idx][0] += dLoss * f * mgF
-					if idx < l.pawnAdjust {
+					if idx < l.pawnAdjust || idx >= l.pawnWeak {
 						r.grad[idx][1] += dLoss * f * egF
+					}
+				}
+
+				if mask.shield {
+					wg := ctShieldDeriv(e.shieldDesc[White])
+					bg := ctShieldDeriv(e.shieldDesc[Black])
+					for j := 0; j < 11; j++ {
+						f := wg[j] - bg[j]
+						r.grad[l.shield+j][0] += dLoss * f * mgF
 					}
 				}
 			}
@@ -1037,12 +1346,30 @@ func ctPrintParams(params []ctPair, l ctLayout) {
 	fmt.Println()
 	fmt.Println("// ================= CURRENT CORE TUNER OUTPUT =================")
 
-	ctPrintMaterial(n, l)       // piece values, bishop pair
-	ctPrintMobilityTables(n, l) // mobility tables
-	ctPrintPassers(n, l)        // passer base values and proximity bonuses
-	ctPrintPhalanx(n, l)        // pawn phalanx table
-	ctPrintAdjustments(n, l)    // center-pattern adjustment tables
-	ctPrintPST(n, l)            // main piece/square tables
+	if tuneMaterial || tunePST {
+		ctPrintMaterial(n, l) // piece values, bishop pair
+	}
+	if tunePST {
+		ctPrintPST(n, l) // main piece/square tables
+	}
+	if tuneMobility {
+		ctPrintMobilityTables(n, l) // mobility tables
+	}
+	if tunePassers {
+		ctPrintPassers(n, l) // passer base values and proximity bonuses
+	}
+	if tunePhalanx {
+		ctPrintPhalanx(n, l) // pawn phalanx table
+	}
+	if tuneAdjustments {
+		ctPrintAdjustments(n, l) // center-pattern adjustment tables
+	}
+	if tuneShield {
+		ctPrintShield(n, l) // pawn shield / pawn storm
+	}
+	if tunePawnWeaknesses {
+		ctPrintPawnWeaknesses(n, l) // isolated/backward/doubled pawn terms
+	}
 
 	fmt.Println("// ==============================================================")
 	fmt.Println()
@@ -1074,6 +1401,57 @@ func ctPrintMaterial(n []ctPair, l ctLayout) {
 
 	fmt.Printf("const bishopPairMG = %d\n", ctRound(n[l.bishopPair][0]))
 	fmt.Printf("const bishopPairEG = %d\n", ctRound(n[l.bishopPair][1]))
+
+	fmt.Println()
+	fmt.Printf("const rookPairMG = %d\n", ctRound(n[l.rookPair][0]))
+	fmt.Printf("const rookPairEG = %d\n", ctRound(n[l.rookPair][1]))
+	fmt.Printf("const exchangePlusMG = %d\n", ctRound(n[l.exchangePlus][0]))
+	fmt.Printf("const exchangePlusEG = %d\n", ctRound(n[l.exchangePlus][1]))
+	fmt.Printf("const twoMinorsMG = %d\n", ctRound(n[l.twoMinors][0]))
+	fmt.Printf("const twoMinorsEG = %d\n", ctRound(n[l.twoMinors][1]))
+}
+
+func ctPrintShield(n []ctPair, l ctLayout) {
+	fmt.Println()
+	fmt.Println("// King pawn shield / enemy pawn storm (MG only).")
+	fmt.Printf("const shieldRank2 = %d\n", ctRound(n[l.shield+ctShieldR2][0]))
+	fmt.Printf("const shieldRank3 = %d\n", ctRound(n[l.shield+ctShieldR3][0]))
+	fmt.Printf("const shieldRank4 = %d\n", ctRound(n[l.shield+ctShieldR4][0]))
+	fmt.Printf("const shieldRank5 = %d\n", ctRound(n[l.shield+ctShieldR5][0]))
+	fmt.Printf("const shieldRank6 = %d\n", ctRound(n[l.shield+ctShieldR6][0]))
+	fmt.Printf("const shieldRank7 = %d\n", ctRound(n[l.shield+ctShieldR7][0]))
+	fmt.Printf("const shieldNoPawn = %d\n", ctRound(n[l.shield+ctShieldNone][0]))
+	fmt.Printf("const stormRank3 = %d\n", ctRound(n[l.shield+ctStormR3][0]))
+	fmt.Printf("const stormRank4 = %d\n", ctRound(n[l.shield+ctStormR4][0]))
+	fmt.Printf("const stormRank5 = %d\n", ctRound(n[l.shield+ctStormR5][0]))
+	fmt.Printf("const stormNoPawn = %d\n", ctRound(n[l.shield+ctStormNone][0]))
+}
+
+func ctPrintPawnWeaknesses(n []ctPair, l ctLayout) {
+	fmt.Println()
+	fmt.Println("// Pawn weaknesses.")
+	fmt.Printf("const isolatedMG = %d\n", ctRound(n[l.pawnWeak+ctWeakIsolated][0]))
+	fmt.Printf("const isolatedEG = %d\n", ctRound(n[l.pawnWeak+ctWeakIsolated][1]))
+	fmt.Printf("const isolatedOpenMG = %d\n", ctRound(n[l.pawnWeak+ctWeakIsolatedOpen][0]))
+	fmt.Printf("const backwardMG = %d\n", ctRound(n[l.pawnWeak+ctWeakBackward][0]))
+	fmt.Printf("const backwardEG = %d\n", ctRound(n[l.pawnWeak+ctWeakBackward][1]))
+	fmt.Printf("const backwardOpenMG = %d\n", ctRound(n[l.pawnWeak+ctWeakBackwardOpen][0]))
+	fmt.Print("var doubledPawnMG = [4]int{")
+	for i := 0; i < 4; i++ {
+		if i != 0 {
+			fmt.Print(", ")
+		}
+		fmt.Print(ctRound(n[l.pawnWeak+ctWeakDoubledA+i][0]))
+	}
+	fmt.Println("}")
+	fmt.Print("var doubledPawnEG = [4]int{")
+	for i := 0; i < 4; i++ {
+		if i != 0 {
+			fmt.Print(", ")
+		}
+		fmt.Print(ctRound(n[l.pawnWeak+ctWeakDoubledA+i][1]))
+	}
+	fmt.Println("}")
 }
 
 func ctPrintMobilityTables(n []ctPair, l ctLayout) {
@@ -1336,12 +1714,14 @@ func ctTune(filename string, epochs int, lr float64, lambda float64) {
 	initial := append([]ctPair(nil), params...)
 
 	mask := ctTuneMask{
-		material:    tuneMaterial,
-		pst:         tunePST,
-		mobility:    tuneMobility,
-		passers:     tunePassers,
-		phalanx:     tunePhalanx,
-		adjustments: tuneAdjustments,
+		material:     tuneMaterial,
+		pst:          tunePST,
+		mobility:     tuneMobility,
+		passers:      tunePassers,
+		phalanx:      tunePhalanx,
+		adjustments:  tuneAdjustments,
+		shield:       tuneShield,
+		pawnWeakness: tunePawnWeaknesses,
 	}
 
 	fmt.Printf(
@@ -1351,8 +1731,8 @@ func ctTune(filename string, epochs int, lr float64, lambda float64) {
 		ctWorkers(),
 	)
 	fmt.Printf(
-		"[core-tuner] material=%v pst=%v mobility=%v passers=%v phalanx=%v adjustments=%v lambda=%.6g\n",
-		mask.material, mask.pst, mask.mobility, mask.passers, mask.phalanx, mask.adjustments, lambda,
+		"[core-tuner] material=%v pst=%v mobility=%v passers=%v phalanx=%v adjustments=%v shield=%v pawnWeakness=%v lambda=%.6g\n",
+		mask.material, mask.pst, mask.mobility, mask.passers, mask.phalanx, mask.adjustments, mask.shield, mask.pawnWeakness, lambda,
 	)
 
 	data, err := ctLoadDataset(filename, params, l)

@@ -227,6 +227,7 @@ func eval_internal(p *Pos, shouldReport bool, ss *SearchState) int {
 	evaluateThreats(p, &e, White)
 	evaluateThreats(p, &e, Black)
 
+	// Material imbalance eval
 	wMinors := p.count[White][N] + p.count[White][B]
 	bMinors := p.count[Black][N] + p.count[Black][B]
 	wMajors := p.count[White][R] + 2 * p.count[White][Q]
@@ -347,7 +348,7 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 	for pieces != 0 {
 		sq := lsb(pieces)
 
-		// bishop mobility and pst tables
+		// bishop material and pst tables
 		add(e, side, EvalMaterial, pieceValMG[B], pieceValEG[B])
 		addPST(e, side, B, sq)
 

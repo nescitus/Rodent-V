@@ -2,6 +2,7 @@ package main
 
 // --- Eval params ---
 
+// Basic piece values.
 var pieceValMG = [7]int{89, 337, 348, 461, 938, 0, 0}
 var pieceValEG = [7]int{135, 447, 464, 787, 1534, 0, 0}
 
@@ -10,13 +11,19 @@ var pieceValEG = [7]int{135, 447, 464, 787, 1534, 0, 0}
 // let the bishop pair dominate knight+bishop or two knights.
 var bishopPairMG = 26
 var bishopPairEG = 59
+
+// rookPairMG/EG: an incentive to exchange pair of rooks
+// in positions with material imbalance.
 var rookPairMG = -4
 var rookPairEG = -14
+
+// exchangePlusMG/EG: discourages exchange sacrifices.
 var exchangePlusEG = 9
 var exchangePlusMG = 12
+
+// twoMinorsMG/EG: two minors for a rook adjustement.
 var twoMinorsMG = 20
 var twoMinorsEG = -20
-var np = 1
 
 // mobility
 var nMobMg = [9]int {-12,  -9,  -6,  -3,   0,   3,   6,   9,  12}
