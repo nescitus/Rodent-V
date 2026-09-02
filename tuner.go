@@ -58,7 +58,7 @@ var tunePawnWeaknesses bool = false
 
 type ctPair [2]float64
 
-const ctAdjustSquares = 48 // relative ranks 1..6; ranks 7..8 are fixed at zero
+const ctAdjustSquares = 40 // relative ranks 1..6; ranks 6..8 are fixed at zero
 
 type ctCoeff struct {
 	index uint16
@@ -341,8 +341,8 @@ func ctInitParams(l ctLayout) []ctPair {
 		}
 	}
 
-	// Center-pattern adjustments are MG-only. Only relative ranks 1..6 are stored;
-	// relative ranks 7..8 are fixed at zero. EG stays exactly zero.
+	// Center-pattern adjustments are MG-only. Only relative ranks 1..5 are stored;
+	// relative ranks 6..8 are fixed at zero. EG stays exactly zero.
 	for center := 0; center < len(pawnAdjust); center++ {
 		for side := White; side <= Black; side++ {
 			for canonicalSq := 0; canonicalSq < ctAdjustSquares; canonicalSq++ {
