@@ -166,6 +166,8 @@ func nnueAddSingle(a, w *int16) {
 		addSingleAVX2_512(a, w)
 	case 768:
 		addSingleAVX2_768(a, w)
+	case 1024:
+		addSingleAVX2_1024(a, w)
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -189,6 +191,8 @@ func nnueSubSingle(a, w *int16) {
 		subSingleAVX2_512(a, w)
 	case 768:
 		subSingleAVX2_768(a, w)
+	case 1024:
+		subSingleAVX2_1024(a, w)		
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -212,6 +216,8 @@ func nnueMove(a0, a1 *int16, wFrom0, wTo0, wFrom1, wTo1 *int16) {
 		moveAVX2_512(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
 	case 768:
 		moveAVX2_768(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	case 1024:
+		moveAVX2_1024(a0, a1, wFrom0, wTo0, wFrom1, wTo1)		
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -235,6 +241,8 @@ func nnueCapture(a0, a1 *int16, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1 *int16)
 		captureAVX2_512(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
 	case 768:
 		captureAVX2_768(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	case 1024:
+		captureAVX2_1024(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)		
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -258,6 +266,8 @@ func nnueCastle(a0, a1 *int16, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, w
 		castleAVX2_512(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
 	case 768:
 		castleAVX2_768(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	case 1024:
+		castleAVX2_1024(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)		
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -281,6 +291,8 @@ func nnueEval(a0, a1, w0, w1 *int16, sum *int32) {
 		getEvalAVX2_512(a0, a1, w0, w1, sum)
 	case 768:
 		getEvalAVX2_768(a0, a1, w0, w1, sum)
+	case 1024:
+		getEvalAVX2_1024(a0, a1, w0, w1, sum)		
 	default:
 		panic("unsupported NNUE hidden size")
 	}
