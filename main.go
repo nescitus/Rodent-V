@@ -45,7 +45,7 @@ import (
 	"strconv"
 )
 
-const versionString = "1.2"
+const versionString = "1.2.02"
 
 // init() is guaranteed to run before main()
 func init() {
@@ -84,7 +84,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "tune":
-			ctTune("d:/epd/lichess-quiet.epd", 300, 0.25, 0.25)
+			ctTune("d:/epd/lichess-quiet.epd", 100, 0.25, 0.1)
 			return
 		case "tunefile":
 			if len(os.Args) < 3 {
