@@ -92,7 +92,7 @@ var mgPSQT = [6][64]int{
 }
 
 // Endgame piece/square eables.
-var egPSQT = [6][64]int{
+var egPSQTx = [6][64]int{
 	P: {
 		0, 0, 0, 0, 0, 0, 0, 0,
 		13, 8, 8, 10, 13, 0, 2, -7,
@@ -173,7 +173,7 @@ func init() {
 			mgTable[White][pt][sq] = mgMat[pt] + mgPSQT[pt][sq]
 			egTable[White][pt][sq] = egMat[pt] + egPSQT[pt][sq]
 			mgTable[Black][pt][sq] = mgMat[pt] + mgPSQT[pt][sq^56]
-			egTable[Black][pt][sq] = egMat[pt] + egPSQT[pt][sq^56]
+			egTable[Black][pt][sq] = egMat[pt] + egPSQTx[pt][sq^56]
 		}
 	}
 }
