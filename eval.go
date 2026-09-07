@@ -43,6 +43,32 @@
 
 package main
 
+// Each side is evaluated in a coordinate system normalized around
+// its own king.
+//
+//   1. White keeps the normal PeSTO orientation.
+//      Black is flipped vertically.
+//   2. If our normalized king is on files a-d, the whole friendly
+//      piece set is mirrored horizontally.
+//   3. Our king therefore always occupies the canonical kingside.
+//   4. The middlegame PST is selected according to whether the
+//      enemy king is physically on the same wing or opposite wing.
+//
+// The two middlegame PST sets are intentionally duplicated even
+// though their initial values are identical. They can diverge while
+// tuning.
+//
+// Endgame uses one shared PST set, but still uses the same own-king
+// normalization.
+//
+// Additional terms are the current evaluator's mobility, passed-pawn
+// bonus, and isolated-pawn penalty.
+
+const (
+	SameWing = iota
+	OppositeWing
+)
+
 // Stuff not in params.go, because we don't tune it
 
 // minorHomeBB[side]: bitboard of the four squares where knights and bishops
@@ -215,6 +241,52 @@ func eval_internal(p *Pos, shouldReport bool, ss *SearchState) int {
 	e.kingRing[White] = kingAtk[p.kingSq[White]]
 	e.kingRing[Black] = kingAtk[p.kingSq[Black]]
 
+	/*
+	Bench Complete!
+Total Nodes : 63757745
+Total Time  : 57570 ms
+Total NPS   : 1107481
+63757745 nodes 1107481 nps
+
+Total Nodes : 63757745
+Total Time  : 56797 ms
+Total NPS   : 1122545
+63757745 nodes 1122545 nps
+	
+	*/
+
+
+	// Piece/square tables, normalized so that own king
+	// appears on the kingside and taking into account
+	// enemy king's wing. We have different sets for kings
+	// on the same wing and kings on the opposite wings.
+	var pstMg[2] int
+	var pstEg[2] int
+		for side := White; side <= Black; side++ {
+		bucket := kingBucket(p, side)
+
+		for pt := P; pt <= K; pt++ {
+			pieces := p.pieceBB(side, pt)
+
+			for pieces != 0 {
+				sq := lsb(pieces)
+				pieces &= pieces - 1
+
+				nsq := normalizeSquare(p, side, sq)
+
+				if bucket == SameWing {
+					pstMg[side] += pstSameByColor[side][pt][nsq]
+				} else {
+					pstMg[side] += pstOppositeByColor[side][pt][nsq]
+				}
+
+				pstEg[side] += pstEGByColor[side][pt][nsq]
+			}
+		}
+	}
+	add(&e, White, EvalPst, pstMg[White], pstEg[White])
+	add(&e, Black, EvalPst, pstMg[Black], pstEg[Black])
+
 	evaluatePawnStructure(p, &e, ss)
 
 	evaluatePieces(p, &e, White)
@@ -292,6 +364,31 @@ func eval_internal(p *Pos, shouldReport bool, ss *SearchState) int {
 	return -score
 }
 
+func kingWing(sq int) int {
+	if fileOf(sq) < 4 {
+		return 0
+	}
+	return 1
+}
+
+func kingBucket(p *Pos, side int) int {
+	if kingWing(p.kingSq[side]) == kingWing(p.kingSq[opp(side)]) {
+		return SameWing
+	}
+	return OppositeWing
+}
+
+// Normalize our own king onto files e-h.
+func normalizeSquare(p *Pos, side, sq int) int {
+	kingSq := p.kingSq[side]
+
+	if fileOf(kingSq) < 4 {
+		sq ^= 7
+	}
+
+	return sq
+}
+
 // evaluatePieces evaluates pieces (except pawns and king),
 // sets game phase, and accumulates king-safety attack data.
 func evaluatePieces(p *Pos, e *EvalData, side int) {
@@ -304,7 +401,6 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 	for pieces != 0 {
 		sq := lsb(pieces)
 		add(e, side, EvalMaterial, pieceValMG[N], pieceValEG[N])
-		addPST(e, side, N, sq)
 
 		// Piece/square adjustement for predefined pawn centers
 		if e.center[side] != Undefined {
@@ -350,7 +446,6 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 
 		// bishop material and pst tables
 		add(e, side, EvalMaterial, pieceValMG[B], pieceValEG[B])
-		addPST(e, side, B, sq)
 
 		// Piece/square adjustement for predefined pawn centers
 		if e.center[side] != Undefined {
@@ -395,7 +490,6 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 
 		// rook material and pst
 		add(e, side, EvalMaterial, pieceValMG[R], pieceValEG[R])
-		addPST(e, side, R, sq)
 
 		// rook board control
 		atks := rookAttacks(occForRook, sq)
@@ -433,7 +527,6 @@ func evaluatePieces(p *Pos, e *EvalData, side int) {
 
 		// queen material and pst
 		add(e, side, EvalMaterial, pieceValMG[Q], pieceValEG[Q])
-		addPST(e, side, Q, sq)
 
 		// queen square control
 		atks := queenAttacks(occForQueen, sq)
@@ -622,7 +715,6 @@ func evaluatePassers(p *Pos, e *EvalData, side int) {
 	for pieces != 0 {
 		sq := lsb(pieces)
 		add(e, side, EvalMaterial, pieceValMG[P], pieceValEG[P])
-		addPST(e, side, P, sq)
 
 		// Passed pawn: no enemy pawns in front on same or adjacent files.
 		if passedMask[side][sq]&p.pieceBB(enemy, P) == 0 {
@@ -751,7 +843,6 @@ func pawnShieldMG(p *Pos, side int) int {
 // evaluatePieces.
 func evaluateKing(p *Pos, e *EvalData, side int) {
 	sq := p.kingSq[side]
-	addPST(e, side, K, sq)
 	e.addAttacks(side, K, kingAtk[sq])
 
 	// King-attack danger: pressure accumulated by the *enemy* on our
@@ -917,11 +1008,6 @@ func getPushSq(side, sq int) int {
 
 func addPhalanx(e *EvalData, side, sq int) {
 	add(e, side, EvalPawns, phalanxMgByColor[side][sq], phalanxEgByColor[side][sq])
-}
-
-// addPST adds the piece-square table score for a piece on sq.
-func addPST(e *EvalData, side, piece, sq int) {
-	add(e, side, EvalPst, pstMGByColor[side][piece][sq], pstEGByColor[side][piece][sq])
 }
 
 // add adds MG/EG scores for one side to EvalData.

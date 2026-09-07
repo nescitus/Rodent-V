@@ -8,7 +8,7 @@ package main
 //   - bishop pair
 //   - rook pair
 //   - material imbalances: exchangePlus and twoMinors
-//   - main PSTs P..K
+//   - king-wing PSTs P..K: mgPSQTSame / mgPSQTOpposite / shared egPSQT
 //   - mobility lookup tables: nMobMg/Eg, bMobMg/Eg, rMobMg/Eg, qMobMg/Eg
 //   - passedBonusMG/EG[blocked][relative rank]
 //   - ourPasserProximityMG/EG
@@ -47,13 +47,13 @@ import (
 // Please note that we try to keep pst tables
 // near 0, and as a compensation we change
 // material values.
-var tuneMaterial bool = false
+var tuneMaterial bool = true
 var tunePST bool = false
 var tuneMobility bool = false
 var tunePassers bool = false
 var tunePhalanx bool = false
-var tuneAdjustments bool = true
-var tuneShield bool = false
+var tuneAdjustments bool = false
+var tuneShield bool = true
 var tunePawnWeaknesses bool = false
 
 type ctPair [2]float64
@@ -61,9 +61,9 @@ type ctPair [2]float64
 const ctAdjustSquares = 40 // relative ranks 1..5; ranks 6..8 are fixed at zero
 const ctPawnAdjustStart = 8
 const ctPawnAdjustSquares = ctAdjustSquares - ctPawnAdjustStart // ranks 2..5
-const ctPhalanxStart = 8  // first square of relative rank 2
-const ctPhalanxEnd = 56   // first square of relative rank 8
-const ctPhalanxSquares = ctPhalanxEnd - ctPhalanxStart // ranks 2..7
+const ctPhalanxStart = 8                                        // first square of relative rank 2
+const ctPhalanxEnd = 56                                         // first square of relative rank 8
+const ctPhalanxSquares = ctPhalanxEnd - ctPhalanxStart          // ranks 2..7
 
 type ctCoeff struct {
 	index uint16
@@ -88,8 +88,10 @@ type ctDataset struct {
 }
 
 type ctLayout struct {
-	pieceVal int // 5 entries: P..Q
-	pst      int // 6*64
+	pieceVal    int // 5 entries: P..Q
+	pstSame     int // 6*64, MG-only
+	pstOpposite int // 6*64, MG-only
+	pstEG       int // 6*64, EG-only
 
 	nMob int
 	bMob int
@@ -133,7 +135,7 @@ func ctParamEnabled(i int, l ctLayout, mask ctTuneMask) bool {
 	switch {
 	case i >= l.pieceVal && i < l.pieceVal+5:
 		return mask.material
-	case i >= l.pst && i < l.pst+6*64:
+	case i >= l.pstSame && i < l.nMob:
 		return mask.pst
 	case i >= l.nMob && i < l.bishopPair:
 		return mask.mobility
@@ -164,10 +166,17 @@ func ctCountEnabled(l ctLayout, mask ctTuneMask) int {
 	return n
 }
 
-// ctParamPhaseEnabled is like ctParamEnabled, but adjustment tables and
-// shield/storm terms are MG-only in the engine, so their EG half is disabled.
+// ctParamPhaseEnabled is like ctParamEnabled, but some blocks are phase-specific:
+// wing PSTs and adjustments/shield are MG-only; shared egPSQT is EG-only.
 func ctParamPhaseEnabled(i, ph int, l ctLayout, mask ctTuneMask) bool {
 	if !ctParamEnabled(i, l, mask) {
+		return false
+	}
+
+	if i >= l.pstSame && i < l.pstEG && ph == 1 {
+		return false
+	}
+	if i >= l.pstEG && i < l.nMob && ph == 0 {
 		return false
 	}
 	if i >= l.pawnAdjust && i < l.pawnWeak && ph == 1 {
@@ -196,9 +205,11 @@ func ctMakeLayout() ctLayout {
 	var l ctLayout
 
 	l.pieceVal = 0
-	l.pst = l.pieceVal + 5
+	l.pstSame = l.pieceVal + 5
+	l.pstOpposite = l.pstSame + 6*64
+	l.pstEG = l.pstOpposite + 6*64
 
-	l.nMob = l.pst + 6*64
+	l.nMob = l.pstEG + 6*64
 	l.bMob = l.nMob + len(nMobMg)
 	l.rMob = l.bMob + len(bMobMg)
 	l.qMob = l.rMob + len(rMobMg)
@@ -280,11 +291,18 @@ func ctInitParams(l ctLayout) []ctPair {
 		}
 	}
 
+	// Wing-conditioned PSTs. The evaluator chooses one MG table from
+	// king-wing geometry, while endgame uses one shared PST.
 	for piece := P; piece <= K; piece++ {
 		for sq := 0; sq < 64; sq++ {
-			p[l.pst+piece*64+sq] = ctPair{
-				float64(pstMG[piece][sq]),
-				float64(pstEG[piece][sq]),
+			p[l.pstSame+piece*64+sq] = ctPair{
+				float64(mgPSQTSame[piece][sq]), 0,
+			}
+			p[l.pstOpposite+piece*64+sq] = ctPair{
+				float64(mgPSQTOpposite[piece][sq]), 0,
+			}
+			p[l.pstEG+piece*64+sq] = ctPair{
+				0, float64(egPSQT[piece][sq]),
 			}
 		}
 	}
@@ -356,7 +374,7 @@ func ctInitParams(l ctLayout) []ctPair {
 				if side == Black {
 					engineSq ^= 56
 				}
-				i := l.pawnAdjust + (center*2+side)*ctPawnAdjustSquares + (canonicalSq-ctPawnAdjustStart)
+				i := l.pawnAdjust + (center*2+side)*ctPawnAdjustSquares + (canonicalSq - ctPawnAdjustStart)
 				p[i] = ctPair{float64(pawnAdjust[center][side][engineSq]), 0}
 			}
 		}
@@ -445,7 +463,7 @@ func ctPawnAdjustIndex(base, center, side, sq int) (int, bool) {
 	if canonicalSq < ctPawnAdjustStart || canonicalSq >= ctAdjustSquares {
 		return 0, false
 	}
-	return base + (center*2+side)*ctPawnAdjustSquares + (canonicalSq-ctPawnAdjustStart), true
+	return base + (center*2+side)*ctPawnAdjustSquares + (canonicalSq - ctPawnAdjustStart), true
 }
 
 func ctPhalanxIndex(pstSq int) (int, bool) {
@@ -658,6 +676,21 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 			sign = -1
 		}
 		enemy := opp(side)
+		pstBucket := kingBucket(pos, side)
+
+		// Match eval_internal(): normalize around our king and choose
+		// the MG table from same-wing / opposite-wing king geometry.
+		addPSTCoeff := func(piece, sq int) {
+			nsq := normalizeSquare(pos, side, sq)
+
+			if pstBucket == SameWing {
+				addCoeff(l.pstSame+piece*64+nsq, sign)
+			} else {
+				addCoeff(l.pstOpposite+piece*64+nsq, sign)
+			}
+
+			addCoeff(l.pstEG+piece*64+nsq, sign)
+		}
 
 		// Match the current eval's slider mobility exactly, including its
 		// intentionally retained x-ray/transparency behavior.
@@ -679,7 +712,7 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 			}
 
 			addCoeff(l.pieceVal+P, sign)
-			addCoeff(l.pst+P*64+pstSq, sign)
+			addPSTCoeff(P, sq)
 
 			if centerEval.center[side] != Undefined {
 				center := int(centerEval.center[side])
@@ -756,13 +789,8 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 		for bb := pos.pieceBB(side, N); bb != 0; bb &= bb - 1 {
 			sq := lsb(bb)
 
-			pstSq := sq
-			if side == Black {
-				pstSq ^= 56
-			}
-
 			addCoeff(l.pieceVal+N, sign)
-			addCoeff(l.pst+N*64+pstSq, sign)
+			addPSTCoeff(N, sq)
 
 			if centerEval.center[side] != Undefined {
 				center := int(centerEval.center[side])
@@ -787,13 +815,8 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 		for bb := pos.pieceBB(side, B); bb != 0; bb &= bb - 1 {
 			sq := lsb(bb)
 
-			pstSq := sq
-			if side == Black {
-				pstSq ^= 56
-			}
-
 			addCoeff(l.pieceVal+B, sign)
-			addCoeff(l.pst+B*64+pstSq, sign)
+			addPSTCoeff(B, sq)
 
 			if centerEval.center[side] != Undefined {
 				center := int(centerEval.center[side])
@@ -821,13 +844,8 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 		for bb := pos.pieceBB(side, R); bb != 0; bb &= bb - 1 {
 			sq := lsb(bb)
 
-			pstSq := sq
-			if side == Black {
-				pstSq ^= 56
-			}
-
 			addCoeff(l.pieceVal+R, sign)
-			addCoeff(l.pst+R*64+pstSq, sign)
+			addPSTCoeff(R, sq)
 
 			cnt := popCount(rookAttacks(occForRook, sq))
 			if cnt < 0 || cnt >= len(rMobMg) {
@@ -847,13 +865,8 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 		for bb := pos.pieceBB(side, Q); bb != 0; bb &= bb - 1 {
 			sq := lsb(bb)
 
-			pstSq := sq
-			if side == Black {
-				pstSq ^= 56
-			}
-
 			addCoeff(l.pieceVal+Q, sign)
-			addCoeff(l.pst+Q*64+pstSq, sign)
+			addPSTCoeff(Q, sq)
 
 			cnt := popCount(queenAttacks(occForQueen, sq))
 			if cnt < 0 || cnt >= len(qMobMg) {
@@ -865,11 +878,7 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 
 		// King PST.
 		ksq := pos.kingSq[side]
-		pstSq := ksq
-		if side == Black {
-			pstSq ^= 56
-		}
-		addCoeff(l.pst+K*64+pstSq, sign)
+		addPSTCoeff(K, ksq)
 	}
 
 	// Material imbalance corrections. Match eval_internal() exactly.
@@ -1364,31 +1373,42 @@ func ctRound(x float64) int {
 	return int(x - 0.5)
 }
 
-// PST normalization. We want piece/square tables centered around zero,
-// which gives theoretical possibility of changing them without touching
-// anything else. If table's mean score grows too high or too low, we
-// offload the difference into material values. No action needs to be
-// taken for the king (there are no legal positions with king imbalance)
+// PST normalization. The two MG buckets are centered together so their
+// relative offset survives; the shared EG table is centered independently.
+// Common offsets are transferred into material values.
 func ctRecenterPST(params []ctPair, l ctLayout) []ctPair {
 	n := append([]ctPair(nil), params...)
 
 	for piece := P; piece <= K; piece++ {
-		for ph := 0; ph < 2; ph++ {
-			sum := 0.0
+		// Same/Opposite MG tables share one common offset. Removing one
+		// mean from both preserves their relative bucket bias, and that
+		// common component can be moved into the shared material value.
+		mgSum := 0.0
+		for sq := 0; sq < 64; sq++ {
+			mgSum += n[l.pstSame+piece*64+sq][0]
+			mgSum += n[l.pstOpposite+piece*64+sq][0]
+		}
+		mgMean := mgSum / 128.0
 
-			for sq := 0; sq < 64; sq++ {
-				sum += n[l.pst+piece*64+sq][ph]
-			}
+		for sq := 0; sq < 64; sq++ {
+			n[l.pstSame+piece*64+sq][0] -= mgMean
+			n[l.pstOpposite+piece*64+sq][0] -= mgMean
+		}
 
-			mean := sum / 64.0
+		// Endgame has one shared table.
+		egSum := 0.0
+		for sq := 0; sq < 64; sq++ {
+			egSum += n[l.pstEG+piece*64+sq][1]
+		}
+		egMean := egSum / 64.0
 
-			for sq := 0; sq < 64; sq++ {
-				n[l.pst+piece*64+sq][ph] -= mean
-			}
+		for sq := 0; sq < 64; sq++ {
+			n[l.pstEG+piece*64+sq][1] -= egMean
+		}
 
-			if piece <= Q {
-				n[l.pieceVal+piece][ph] += mean
-			}
+		if piece <= Q {
+			n[l.pieceVal+piece][0] += mgMean
+			n[l.pieceVal+piece][1] += egMean
 		}
 	}
 
@@ -1708,20 +1728,20 @@ func ctPrintAdjustments(n []ctPair, l ctLayout) {
 var ctPSTLabels = [6]string{"P", "N", "B", "R", "Q", "K"}
 
 func ctPrintPST(n []ctPair, l ctLayout) {
-	// preamble
 	fmt.Println()
-	fmt.Println("// Piece/square tables are roughly centered around zero, which means that")
-	fmt.Println("// the sum of their values is close to zero. It has a few advantages:")
-	fmt.Println("// changing pst percentage value should not disturb engine's perception")
-	fmt.Println("// of material advantage, and changing pst to another zero-centered set")
-	fmt.Println("// should not require adjustement of material values.")
+	fmt.Println("// King-relative piece/square tables.")
+	fmt.Println("// MG uses same-wing and opposite-wing buckets; EG is shared.")
 
-	for _, t := range []struct {
-		ph   int
-		name string
-	}{
-		{0, "pstMG"},
-		{1, "pstEG"},
+	type tableSpec struct {
+		name  string
+		base  int
+		phase int
+	}
+
+	for _, t := range []tableSpec{
+		{"mgPSQTSame", l.pstSame, 0},
+		{"mgPSQTOpposite", l.pstOpposite, 0},
+		{"egPSQT", l.pstEG, 1},
 	} {
 		fmt.Printf("var %s = [6][64]int{\n", t.name)
 
@@ -1737,8 +1757,7 @@ func ctPrintPST(n []ctPair, l ctLayout) {
 					}
 
 					sq := rank*8 + file
-
-					fmt.Printf("%4d", ctRound(n[l.pst+piece*64+sq][t.ph]))
+					fmt.Printf("%4d", ctRound(n[t.base+piece*64+sq][t.phase]))
 				}
 
 				fmt.Println(",")
