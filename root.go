@@ -40,6 +40,17 @@ func think(p *Pos, states []*SearchState, maxDepth int, nodesLimit int64) {
 
 	if nodesLimit <= 0 && singleOptionValue[NodesLimit] > 0 {
 		nodesLimit = int64(singleOptionValue[NodesLimit])
+	} else if nodesLimit > 0 {
+		switch {
+		case nodesLimit < 500:
+			timeoutTestPeriod = 63
+		case nodesLimit < 1000:
+			timeoutTestPeriod = 127
+		case nodesLimit < 2000:
+			timeoutTestPeriod = 255
+		case nodesLimit < 4000:
+			timeoutTestPeriod = 511
+		}
 	}
 
 	for i := 0; i < numThreads && i < len(states); i++ {
@@ -139,7 +150,7 @@ func think(p *Pos, states []*SearchState, maxDepth int, nodesLimit int64) {
 	var bestMoveStability int
 
 	for rootDepth = 1; rootDepth <= maxDepth; rootDepth++ {
-		if nodesLimit > 0 && ss.nodes >= nodesLimit {
+		if rootDepth > 1 && nodesLimit > 0 && ss.nodes >= nodesLimit {
 			break
 		}
 		if ss.isAbortingSearch() {
@@ -253,24 +264,6 @@ func think(p *Pos, states []*SearchState, maxDepth int, nodesLimit int64) {
 	bestMove, _, _ := selectBestThreadMove(states, numThreads)
 	if bestMove == 0 {
 		bestMove = pvs[0][0]
-	}
-
-	if bestMove == 0 {
-		var list [maxMoves]int
-		capCount := genCaptures(p, list[:])
-		quietCount := genQuiet(p, list[capCount:])
-		total := capCount + quietCount
-		for i := 0; i < total; i++ {
-			move := list[i]
-			child := *p
-			var u Update
-			var r Revert
-			makeMove(&child, &u, &r, move)
-			if !child.selfInCheck() {
-				bestMove = move
-				break
-			}
-		}
 	}
 
 	if bestMove != 0 {
