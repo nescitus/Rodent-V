@@ -29,7 +29,7 @@ import (
 // On fail-low beta is first collapsed to the midpoint before alpha widens,
 // avoiding a needlessly large high-side window.  The delta grows by 50% on
 // each failure (smoother than doubling) until the window opens fully.
-func think(p *Pos, states []*SearchState, maxDepth int) {
+func think(p *Pos, states []*SearchState, maxDepth int, nodesLimit int64) {
 	engineSide = p.side
 	configureEngineStrength()
 	atomic.StoreInt32(&abortFlag, 0)
@@ -38,9 +38,30 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 	ss.resetForSearch(p)
 	refresh(p, &ss.accStack[0])
 
+	if nodesLimit <= 0 && singleOptionValue[NodesLimit] > 0 {
+		nodesLimit = int64(singleOptionValue[NodesLimit])
+	} else if nodesLimit > 0 {
+		switch {
+		case nodesLimit < 500:
+			timeoutTestPeriod = 63
+		case nodesLimit < 1000:
+			timeoutTestPeriod = 127
+		case nodesLimit < 2000:
+			timeoutTestPeriod = 255
+		case nodesLimit < 4000:
+			timeoutTestPeriod = 511
+		}
+	}
+
+	for i := 0; i < numThreads && i < len(states); i++ {
+		if states[i] != nil {
+			states[i].nodesLimit = nodesLimit
+		}
+	}
+
 	// Emit info about node limit
-	if singleOptionValue[NodesLimit] > 0 {
-		fmt.Println("info string search limited to ", singleOptionValue[NodesLimit], " nodes")
+	if nodesLimit > 0 {
+		fmt.Println("info string search limited to", nodesLimit, "nodes")
 	}
 
 	// Launch lazy SMP helper threads (depth 1..INF until abortFlag fires).
@@ -53,6 +74,7 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 			states[i] = h
 		}
 		h.resetForSearch(p)
+		h.nodesLimit = nodesLimit
 		refresh(p, &h.accStack[0])
 		h.searchStart = ss.searchStart // helpers share the same clock origin
 		pCopy := *p
@@ -128,6 +150,12 @@ func think(p *Pos, states []*SearchState, maxDepth int) {
 	var bestMoveStability int
 
 	for rootDepth = 1; rootDepth <= maxDepth; rootDepth++ {
+		if rootDepth > 1 && nodesLimit > 0 && ss.nodes >= nodesLimit {
+			break
+		}
+		if ss.isAbortingSearch() {
+			break
+		}
 		// Before starting a new depth, check elapsed time against dynamic soft time limit.
 		if rootDepth > 1 && !pondering && hardTimeLimit >= 0 {
 			elapsed := time.Now().UnixMilli() - ss.searchStart

@@ -1093,11 +1093,6 @@ func (ss *SearchState) reportInfo(score int, pv []int) {
 // checkTime tests periodically (every 1024 nodes) whether
 // the allocated time has expired or search should abort.
 func (ss *SearchState) checkTime() {
-	if ss.nodesLimit > 0 && ss.nodes >= ss.nodesLimit {
-		ss.aborting = true
-		return
-	}
-
 	if datagenMode {
 		return
 	}
@@ -1112,8 +1107,8 @@ func (ss *SearchState) checkTime() {
 		return
 	}
 
-	// Nodes limit for weaker personalities
-	if singleOptionValue[NodesLimit] > 0 && ss.nodes >= int64(singleOptionValue[NodesLimit]) {
+	// Nodes limit (set by "go nodes" or personality)
+	if ss.nodesLimit > 0 && ss.nodes >= ss.nodesLimit {
 		atomic.StoreInt32(&abortFlag, 1)
 		ss.aborting = true
 		return

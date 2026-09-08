@@ -193,7 +193,7 @@ func uciLoop() {
 				fmt.Printf("bestmove %s\n", moveToStr(move))
 			} else {
 
-				st, mt, md := parseGoParams(tokens[1:], &p)
+				st, mt, md, mn := parseGoParams(tokens[1:], &p)
 				softTimeLimit = st
 				hardTimeLimit = mt
 				pondering = false
@@ -205,10 +205,10 @@ func uciLoop() {
 				}
 				posForSearch := p // copy: the search owns its own position
 				searchDone = make(chan struct{})
-				go func(pos Pos, done chan struct{}, maxDepth int) {
+				go func(pos Pos, done chan struct{}, maxDepth int, maxNodes int64) {
 					defer close(done)
-					think(&pos, states, maxDepth)
-				}(posForSearch, searchDone, md)
+					think(&pos, states, maxDepth, maxNodes)
+				}(posForSearch, searchDone, md, mn)
 			}
 		case "stop":
 			stopSearch()
@@ -532,7 +532,7 @@ func applyMoves(p *Pos, moveStrs []string) {
 //	softLimit (ms): allocated soft time for stopping between iterations; -1 = no limit.
 //	hardLimit (ms): absolute deadline for stopping mid-search; -1 = no limit.
 //	maxDepth: maximum search depth.
-func parseGoParams(tokens []string, p *Pos) (int64, int64, int) {
+func parseGoParams(tokens []string, p *Pos) (int64, int64, int, int64) {
 	wtime := int64(-1)
 	btime := int64(-1)
 	winc := int64(0)
@@ -540,6 +540,7 @@ func parseGoParams(tokens []string, p *Pos) (int64, int64, int) {
 	movestogo := int64(16)
 	movetime := int64(-1)
 	maxDepth := maxPly - 1
+	nodes := int64(-1)
 
 	for i := 0; i < len(tokens); i++ {
 		switch tokens[i] {
@@ -580,8 +581,15 @@ func parseGoParams(tokens []string, p *Pos) (int64, int64, int) {
 					maxDepth = d
 				}
 			}
+		case "nodes":
+			if i+1 < len(tokens) {
+				i++
+				if n, err := strconv.ParseInt(tokens[i], 10, 64); err == nil {
+					nodes = n
+				}
+			}
 		case "infinite":
-			return -1, -1, maxPly - 1
+			return -1, -1, maxPly - 1, -1
 		}
 	}
 
@@ -590,7 +598,7 @@ func parseGoParams(tokens []string, p *Pos) (int64, int64, int) {
 		if t < 0 {
 			t = 0
 		}
-		return t, t, maxDepth
+		return t, t, maxDepth, nodes
 	}
 
 	var myTime, myInc int64
@@ -602,7 +610,7 @@ func parseGoParams(tokens []string, p *Pos) (int64, int64, int) {
 		myInc = binc
 	}
 	if myTime < 0 {
-		return -1, -1, maxDepth // no clock provided -> search indefinitely
+		return -1, -1, maxDepth, nodes // no clock provided -> search indefinitely or by nodes
 	}
 
 	// Reserve a small buffer when only one move remains on the clock.
@@ -633,7 +641,7 @@ func parseGoParams(tokens []string, p *Pos) (int64, int64, int) {
 			hard = 0
 		}
 	}
-	return soft, hard, maxDepth
+	return soft, hard, maxDepth, nodes
 }
 
 // ---- Move string conversion ----
