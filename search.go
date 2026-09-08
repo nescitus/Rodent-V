@@ -1094,6 +1094,9 @@ func (ss *SearchState) reportInfo(score int, pv []int) {
 // the allocated time has expired or search should abort.
 func (ss *SearchState) checkTime() {
 	if ss.nodesLimit > 0 && ss.nodes >= ss.nodesLimit {
+		if !datagenMode {
+			atomic.StoreInt32(&abortFlag, 1)
+		}
 		ss.aborting = true
 		return
 	}
