@@ -33,16 +33,16 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-//go:embed nets/rodent_4kb_768hl_8ob_v2.bin
+//go:embed nets/rodent_4kb_1024hl_8ob_v1.bin
 var embeddedNet []byte
 
 // NNUE size and scale. AVX2 code supports following net sizes:
-// 64, 128, 256, 384, 512, 768
+// 64, 128, 256, 384, 512, 768, 1024
 const (
 	NNUEInputBuckets   = 4
 	NNUEInputSize      = 768
 	TotalInputFeatures = NNUEInputBuckets * NNUEInputSize // 3072 features
-	NNUEHiddenSize     = 768
+	NNUEHiddenSize     = 1024
 	OutputBuckets      = 8
 	NNUEL0Scale        = 255
 	NNUEL1Scale        = 64
@@ -315,6 +315,10 @@ func nnueMove3(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1 *int16) {
 		moveScalar3(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1)
 		return
 	}
+	if NNUEHiddenSize == 1024 {
+		moveAVX2_1024_3op(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1)
+		return
+	}
 	if NNUEHiddenSize == 512 {
 		moveAVX2_512_3op(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1)
 		return
@@ -329,6 +333,12 @@ func nnueCapture3(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCa
 		captureScalar3(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
 		return
 	}
+
+	if NNUEHiddenSize == 1024 {
+		captureAVX2_1024_3op(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+		return
+	}
+
 	if NNUEHiddenSize == 512 {
 		captureAVX2_512_3op(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
 		return
@@ -341,6 +351,10 @@ func nnueCapture3(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCa
 func nnueCastle3(dst0, src0, dst1, src1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1 *int16) {
 	if !hasAVX2 {
 		castleScalar3(dst0, src0, dst1, src1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+		return
+	}
+	if NNUEHiddenSize == 1024 {
+		castleAVX2_1024_3op(dst0, src0, dst1, src1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
 		return
 	}
 	if NNUEHiddenSize == 512 {

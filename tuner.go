@@ -13,7 +13,7 @@ package main
 //   - passedBonusMG/EG[blocked][relative rank]
 //   - ourPasserProximityMG/EG
 //   - theirPasserProximityMG/EG
-//   - phalanxMG/EG[64] (ranks 1 and 8 fixed zero; ranks 2..7 tunable)
+//   - phalanxMG/EG[64] (ranks 1 and 8 plus a-file fixed zero; ranks 2..7, files b..h tunable)
 //   - pawnAdjust / knightAdjust / bishopAdjust center-pattern tables (MG only)
 //   - king pawn shield / enemy pawn storm terms (MG only)
 //
@@ -23,7 +23,6 @@ package main
 //	 - threats
 //	 - king safety
 //	 - assorted pawn weaknesses
-//	 - king's pawn shield and pawn storm
 //	 - rook bonuses
 //
 // Entry point:
@@ -63,7 +62,19 @@ const ctPawnAdjustStart = 8
 const ctPawnAdjustSquares = ctAdjustSquares - ctPawnAdjustStart // ranks 2..5
 const ctPhalanxStart = 8                                        // first square of relative rank 2
 const ctPhalanxEnd = 56                                         // first square of relative rank 8
-const ctPhalanxSquares = ctPhalanxEnd - ctPhalanxStart          // ranks 2..7
+const ctPhalanxFiles = 7                                        // files b..h; a-file is dead
+const ctPhalanxRanks = 6                                        // relative ranks 2..7
+const ctPhalanxSquares = ctPhalanxRanks * ctPhalanxFiles        // 42 compact entries
+
+// Compact PST storage:
+//   - pawn: only relative ranks 2..7 are reachable (48 squares)
+//   - knight/bishop/rook/queen: all 64 squares
+//   - king: normalization always mirrors our king onto files e..h (32 squares)
+const ctPSTPawnSquares = 48
+const ctPSTFullPieces = 4 // N, B, R, Q
+const ctPSTKingSquares = 32
+const ctPSTKingBase = ctPSTPawnSquares + ctPSTFullPieces*64
+const ctPSTBlockSize = ctPSTKingBase + ctPSTKingSquares
 
 type ctCoeff struct {
 	index uint16
@@ -89,9 +100,9 @@ type ctDataset struct {
 
 type ctLayout struct {
 	pieceVal    int // 5 entries: P..Q
-	pstSame     int // 6*64, MG-only
-	pstOpposite int // 6*64, MG-only
-	pstEG       int // 6*64, EG-only
+	pstSame     int // P: 48, N..Q: 4*64, K: 32 reachable squares, MG-only
+	pstOpposite int // P: 48, N..Q: 4*64, K: 32 reachable squares, MG-only
+	pstEG       int // P: 48, N..Q: 4*64, K: 32 reachable squares, EG-only
 
 	nMob int
 	bMob int
@@ -106,7 +117,7 @@ type ctLayout struct {
 	passed    int // 2*8
 	ourProx   int // 8
 	theirProx int // 8
-	phalanx   int // ctPhalanxSquares (relative ranks 2..7)
+	phalanx   int // ctPhalanxSquares (relative ranks 2..7, files b..h)
 
 	// Center-pattern adjustment tables (MG-only)
 	pawnAdjust   int // len(pawnAdjust)*2*ctPawnAdjustSquares
@@ -154,6 +165,21 @@ func ctParamEnabled(i int, l ctLayout, mask ctTuneMask) bool {
 	default:
 		return false
 	}
+}
+
+func ctCountTunableScalars(l ctLayout) int {
+	mask := ctTuneMask{
+		material:     true,
+		pst:          true,
+		mobility:     true,
+		passers:      true,
+		phalanx:      true,
+		adjustments:  true,
+		shield:       true,
+		pawnWeakness: true,
+	}
+
+	return ctCountEnabledScalars(l, mask)
 }
 
 func ctCountEnabled(l ctLayout, mask ctTuneMask) int {
@@ -206,10 +232,10 @@ func ctMakeLayout() ctLayout {
 
 	l.pieceVal = 0
 	l.pstSame = l.pieceVal + 5
-	l.pstOpposite = l.pstSame + 6*64
-	l.pstEG = l.pstOpposite + 6*64
+	l.pstOpposite = l.pstSame + ctPSTBlockSize
+	l.pstEG = l.pstOpposite + ctPSTBlockSize
 
-	l.nMob = l.pstEG + 6*64
+	l.nMob = l.pstEG + ctPSTBlockSize
 	l.bMob = l.nMob + len(nMobMg)
 	l.rMob = l.bMob + len(bMobMg)
 	l.qMob = l.rMob + len(rMobMg)
@@ -291,17 +317,23 @@ func ctInitParams(l ctLayout) []ctPair {
 		}
 	}
 
-	// Wing-conditioned PSTs. The evaluator chooses one MG table from
-	// king-wing geometry, while endgame uses one shared PST.
+	// Wing-conditioned PSTs. Pawn ranks 1 and 8 are unreachable and omitted.
+	// N..Q keep all 64 squares. The king is flattened to the 32 reachable
+	// normalized squares on files e..h.
 	for piece := P; piece <= K; piece++ {
 		for sq := 0; sq < 64; sq++ {
-			p[l.pstSame+piece*64+sq] = ctPair{
+			off, ok := ctPSTIndex(piece, sq)
+			if !ok {
+				continue
+			}
+
+			p[l.pstSame+off] = ctPair{
 				float64(mgPSQTSame[piece][sq]), 0,
 			}
-			p[l.pstOpposite+piece*64+sq] = ctPair{
+			p[l.pstOpposite+off] = ctPair{
 				float64(mgPSQTOpposite[piece][sq]), 0,
 			}
-			p[l.pstEG+piece*64+sq] = ctPair{
+			p[l.pstEG+off] = ctPair{
 				0, float64(egPSQT[piece][sq]),
 			}
 		}
@@ -358,8 +390,11 @@ func ctInitParams(l ctLayout) []ctPair {
 	}
 
 	for pstSq := ctPhalanxStart; pstSq < ctPhalanxEnd; pstSq++ {
-		i := l.phalanx + (pstSq - ctPhalanxStart)
-		p[i] = ctPair{
+		phIdx, ok := ctPhalanxIndex(pstSq)
+		if !ok {
+			continue
+		}
+		p[l.phalanx+phIdx] = ctPair{
 			float64(phalanxMG[pstSq]),
 			float64(phalanxEG[pstSq]),
 		}
@@ -470,7 +505,16 @@ func ctPhalanxIndex(pstSq int) (int, bool) {
 	if pstSq < ctPhalanxStart || pstSq >= ctPhalanxEnd {
 		return 0, false
 	}
-	return pstSq - ctPhalanxStart, true
+
+	file := fileOf(pstSq)
+	if file == 0 {
+		// A phalanx is counted on its eastern pawn, so the a-file can
+		// never carry a coefficient.
+		return 0, false
+	}
+
+	rank := rankOf(pstSq) // 1..6 for relative ranks 2..7
+	return (rank-1)*ctPhalanxFiles + (file - 1), true
 }
 
 // Shield/storm offsets inside l.shield.
@@ -652,6 +696,33 @@ func ctShieldDeriv(desc [3]uint8) [11]float64 {
 	return g
 }
 
+// Return the compact index within one PST block. P..Q use 64 squares;
+// the normalized king can only occur on files e..h, stored as 8x4 = 32.
+func ctPSTIndex(piece, sq int) (int, bool) {
+	switch piece {
+	case P:
+		rank := rankOf(sq)
+		if rank == 0 || rank == 7 {
+			return 0, false
+		}
+		// Relative ranks 2..7 -> compact ranks 0..5.
+		return (rank-1)*8 + fileOf(sq), true
+
+	case N, B, R, Q:
+		// Four complete 64-square blocks follow the compact pawn block.
+		return ctPSTPawnSquares + (piece-N)*64 + sq, true
+
+	case K:
+		file := fileOf(sq)
+		if file < 4 {
+			return 0, false
+		}
+		return ctPSTKingBase + rankOf(sq)*4 + (file - 4), true
+	}
+
+	return 0, false
+}
+
 // Sparse builder for one position.
 // Dense is cheap here because parameter count is only ~450.
 func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoeff {
@@ -682,14 +753,18 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 		// the MG table from same-wing / opposite-wing king geometry.
 		addPSTCoeff := func(piece, sq int) {
 			nsq := normalizeSquare(pos, side, sq)
-
-			if pstBucket == SameWing {
-				addCoeff(l.pstSame+piece*64+nsq, sign)
-			} else {
-				addCoeff(l.pstOpposite+piece*64+nsq, sign)
+			off, ok := ctPSTIndex(piece, nsq)
+			if !ok {
+				panic("ct tuner: normalized PST square is unreachable")
 			}
 
-			addCoeff(l.pstEG+piece*64+nsq, sign)
+			if pstBucket == SameWing {
+				addCoeff(l.pstSame+off, sign)
+			} else {
+				addCoeff(l.pstOpposite+off, sign)
+			}
+
+			addCoeff(l.pstEG+off, sign)
 		}
 
 		// Match the current eval's slider mobility exactly, including its
@@ -1380,32 +1455,42 @@ func ctRecenterPST(params []ctPair, l ctLayout) []ctPair {
 	n := append([]ctPair(nil), params...)
 
 	for piece := P; piece <= K; piece++ {
-		// Same/Opposite MG tables share one common offset. Removing one
-		// mean from both preserves their relative bucket bias, and that
-		// common component can be moved into the shared material value.
 		mgSum := 0.0
-		for sq := 0; sq < 64; sq++ {
-			mgSum += n[l.pstSame+piece*64+sq][0]
-			mgSum += n[l.pstOpposite+piece*64+sq][0]
-		}
-		mgMean := mgSum / 128.0
-
-		for sq := 0; sq < 64; sq++ {
-			n[l.pstSame+piece*64+sq][0] -= mgMean
-			n[l.pstOpposite+piece*64+sq][0] -= mgMean
-		}
-
-		// Endgame has one shared table.
 		egSum := 0.0
-		for sq := 0; sq < 64; sq++ {
-			egSum += n[l.pstEG+piece*64+sq][1]
-		}
-		egMean := egSum / 64.0
+		count := 0
 
 		for sq := 0; sq < 64; sq++ {
-			n[l.pstEG+piece*64+sq][1] -= egMean
+			off, ok := ctPSTIndex(piece, sq)
+			if !ok {
+				continue
+			}
+
+			mgSum += n[l.pstSame+off][0]
+			mgSum += n[l.pstOpposite+off][0]
+			egSum += n[l.pstEG+off][1]
+			count++
 		}
 
+		if count == 0 {
+			continue
+		}
+
+		// Same/Opposite MG tables share one common offset.
+		mgMean := mgSum / float64(2*count)
+		egMean := egSum / float64(count)
+
+		for sq := 0; sq < 64; sq++ {
+			off, ok := ctPSTIndex(piece, sq)
+			if !ok {
+				continue
+			}
+
+			n[l.pstSame+off][0] -= mgMean
+			n[l.pstOpposite+off][0] -= mgMean
+			n[l.pstEG+off][1] -= egMean
+		}
+
+		// P..Q have material values that absorb the common PST offsets.
 		if piece <= Q {
 			n[l.pieceVal+piece][0] += mgMean
 			n[l.pieceVal+piece][1] += egMean
@@ -1731,6 +1816,7 @@ func ctPrintPST(n []ctPair, l ctLayout) {
 	fmt.Println()
 	fmt.Println("// King-relative piece/square tables.")
 	fmt.Println("// MG uses same-wing and opposite-wing buckets; EG is shared.")
+	fmt.Println("// Pawn ranks 1/8 and king files a..d are unreachable and print as zero.")
 
 	type tableSpec struct {
 		name  string
@@ -1757,7 +1843,12 @@ func ctPrintPST(n []ctPair, l ctLayout) {
 					}
 
 					sq := rank*8 + file
-					fmt.Printf("%4d", ctRound(n[t.base+piece*64+sq][t.phase]))
+					off, ok := ctPSTIndex(piece, sq)
+					if !ok {
+						fmt.Printf("%4d", 0)
+						continue
+					}
+					fmt.Printf("%4d", ctRound(n[t.base+off][t.phase]))
 				}
 
 				fmt.Println(",")
@@ -1807,9 +1898,10 @@ func ctTune(filename string, epochs int, lr float64, lambda float64) {
 	}
 
 	fmt.Printf(
-		"[core-tuner] %d parameter pairs, %d enabled, %d workers\n",
+		"[core-tuner] %d storage slots, %d tunable params, %d currently tuned, %d workers\n",
 		l.num,
-		ctCountEnabled(l, mask),
+		ctCountTunableScalars(l),
+		ctCountEnabledScalars(l, mask),
 		ctWorkers(),
 	)
 	fmt.Printf(

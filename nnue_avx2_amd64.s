@@ -1073,6 +1073,54 @@ castle_768_loop:
 
 // 1024 hl functions
 
+// func moveAVX2_1024_3op(
+//     dst0, src0 *int16,
+//     dst1, src1 *int16,
+//     wFrom0, wTo0 *int16,
+//     wFrom1, wTo1 *int16,
+// )
+//
+// Move update, three-operand form:
+//
+//     dst0 = src0 + wTo0 - wFrom0
+//     dst1 = src1 + wTo1 - wFrom1
+//
+// 1024 int16 neurons = 2048 bytes.
+// Each loop iteration processes 16 neurons = 32 bytes.
+TEXT ·moveAVX2_1024_3op(SB), NOSPLIT, $0-64
+	MOVQ dst0+0(FP), AX
+	MOVQ src0+8(FP), BX
+	MOVQ dst1+16(FP), CX
+	MOVQ src1+24(FP), DX
+
+	MOVQ wFrom0+32(FP), SI
+	MOVQ wTo0+40(FP), DI
+
+	MOVQ wFrom1+48(FP), R8
+	MOVQ wTo1+56(FP), R9
+
+	XORQ R10, R10
+
+move3_loop_1024:
+	// Perspective 0: dst0 = src0 + wTo0 - wFrom0
+	VMOVDQU (BX)(R10*1), Y0
+	VPADDW  (DI)(R10*1), Y0, Y0
+	VPSUBW  (SI)(R10*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R10*1)
+
+	// Perspective 1: dst1 = src1 + wTo1 - wFrom1
+	VMOVDQU (DX)(R10*1), Y1
+	VPADDW  (R9)(R10*1), Y1, Y1
+	VPSUBW  (R8)(R10*1), Y1, Y1
+	VMOVDQU Y1, (CX)(R10*1)
+
+	ADDQ $32, R10
+	CMPQ R10, $2048
+	JB move3_loop_1024
+
+	VZEROUPPER
+	RET
+
 // func captureAVX2_1024(
 //     a0, a1 *int16,
 //     wTo0, wFrom0, wCap0 *int16,
@@ -1125,7 +1173,65 @@ capture_1024_loop:
 	VZEROUPPER
 	RET
 
-	// func moveAVX2_1024(
+	// func castleAVX2_1024_3op(
+//     dst0, src0 *int16,
+//     dst1, src1 *int16,
+//     wKFrom0, wKTo0, wRFrom0, wRTo0 *int16,
+//     wKFrom1, wKTo1, wRFrom1, wRTo1 *int16,
+// )
+//
+// Castle update, three-operand form:
+//
+//     dst0 = src0 + kingTo0 - kingFrom0 + rookTo0 - rookFrom0
+//     dst1 = src1 + kingTo1 - kingFrom1 + rookTo1 - rookFrom1
+//
+// 1024 int16 neurons = 2048 bytes.
+// Each loop iteration processes 16 neurons = 32 bytes.
+TEXT ·castleAVX2_1024_3op(SB), NOSPLIT, $0-96
+	MOVQ dst0+0(FP), AX
+	MOVQ src0+8(FP), BX
+	MOVQ dst1+16(FP), CX
+	MOVQ src1+24(FP), DX
+
+	MOVQ wKFrom0+32(FP), SI
+	MOVQ wKTo0+40(FP), DI
+	MOVQ wRFrom0+48(FP), R8
+	MOVQ wRTo0+56(FP), R9
+
+	MOVQ wKFrom1+64(FP), R10
+	MOVQ wKTo1+72(FP), R11
+	MOVQ wRFrom1+80(FP), R12
+	MOVQ wRTo1+88(FP), R13
+
+	XORQ R14, R14
+
+castle3_loop_1024:
+	// Perspective 0: dst0 = src0 + kingTo - kingFrom + rookTo - rookFrom
+	VMOVDQU (BX)(R14*1), Y0
+	VPADDW  (DI)(R14*1), Y0, Y0
+	VPSUBW  (SI)(R14*1), Y0, Y0
+	VPADDW  (R9)(R14*1), Y0, Y0
+	VPSUBW  (R8)(R14*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R14*1)
+
+	// Perspective 1: dst1 = src1 + kingTo - kingFrom + rookTo - rookFrom
+	VMOVDQU (DX)(R14*1), Y1
+	VPADDW  (R11)(R14*1), Y1, Y1
+	VPSUBW  (R10)(R14*1), Y1, Y1
+	VPADDW  (R13)(R14*1), Y1, Y1
+	VPSUBW  (R12)(R14*1), Y1, Y1
+	VMOVDQU Y1, (CX)(R14*1)
+
+	ADDQ $32, R14
+
+	// 1024 int16 neurons = 2048 bytes
+	CMPQ R14, $2048
+	JB castle3_loop_1024
+
+	VZEROUPPER
+	RET
+
+// func moveAVX2_1024(
 //     a0, a1 *int16,
 //     wFrom0, wTo0 *int16,
 //     wFrom1, wTo1 *int16,
@@ -1326,6 +1432,60 @@ geteval_64_loop:
 
 	VZEROUPPER
 	RET
+
+// func captureAVX2_1024_3op(
+//     dst0, src0 *int16,
+//     dst1, src1 *int16,
+//     wTo0, wFrom0, wCap0 *int16,
+//     wTo1, wFrom1, wCap1 *int16,
+// )
+//
+// Capture update, three-operand form:
+//
+//     dst0 = src0 + wTo0 - wFrom0 - wCap0
+//     dst1 = src1 + wTo1 - wFrom1 - wCap1
+//
+// 1024 int16 neurons = 2048 bytes.
+// Each loop iteration processes 16 neurons = 32 bytes.
+TEXT ·captureAVX2_1024_3op(SB), NOSPLIT, $0-80
+	MOVQ dst0+0(FP), AX
+	MOVQ src0+8(FP), BX
+	MOVQ dst1+16(FP), CX
+	MOVQ src1+24(FP), DX
+
+	MOVQ wTo0+32(FP), SI
+	MOVQ wFrom0+40(FP), DI
+	MOVQ wCap0+48(FP), R8
+
+	MOVQ wTo1+56(FP), R9
+	MOVQ wFrom1+64(FP), R10
+	MOVQ wCap1+72(FP), R11
+
+	XORQ R12, R12
+
+capture3_loop_1024:
+	// Perspective 0: dst0 = src0 + wTo0 - wFrom0 - wCap0
+	VMOVDQU (BX)(R12*1), Y0
+	VPADDW  (SI)(R12*1), Y0, Y0
+	VPSUBW  (DI)(R12*1), Y0, Y0
+	VPSUBW  (R8)(R12*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R12*1)
+
+	// Perspective 1: dst1 = src1 + wTo1 - wFrom1 - wCap1
+	VMOVDQU (DX)(R12*1), Y1
+	VPADDW  (R9)(R12*1), Y1, Y1
+	VPSUBW  (R10)(R12*1), Y1, Y1
+	VPSUBW  (R11)(R12*1), Y1, Y1
+	VMOVDQU Y1, (CX)(R12*1)
+
+	ADDQ $32, R12
+	CMPQ R12, $2048
+	JB capture3_loop_1024
+
+	VZEROUPPER
+	RET
+
+// Eval functions
 
 	// func getEvalAVX2_128(
 //     a0, a1 *int16,

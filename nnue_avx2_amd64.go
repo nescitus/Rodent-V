@@ -210,6 +210,12 @@ func moveAVX2_512_3op(
 )
 
 //go:noescape
+func moveAVX2_1024_3op(
+	dst0, src0, dst1, src1 *int16,
+	wFrom0, wTo0, wFrom1, wTo1 *int16,
+)
+
+//go:noescape
 func captureAVX2_512_3op(
 	dst0, src0, dst1, src1 *int16,
 	wTo0, wFrom0, wCap0 *int16,
@@ -217,7 +223,21 @@ func captureAVX2_512_3op(
 )
 
 //go:noescape
+func captureAVX2_1024_3op(
+	dst0, src0, dst1, src1 *int16,
+	wTo0, wFrom0, wCap0 *int16,
+	wTo1, wFrom1, wCap1 *int16,
+)
+
+//go:noescape
 func castleAVX2_512_3op(
+	dst0, src0, dst1, src1 *int16,
+	wKFrom0, wKTo0, wRFrom0, wRTo0 *int16,
+	wKFrom1, wKTo1, wRFrom1, wRTo1 *int16,
+)
+
+//go:noescape
+func castleAVX2_1024_3op(
 	dst0, src0, dst1, src1 *int16,
 	wKFrom0, wKTo0, wRFrom0, wRTo0 *int16,
 	wKFrom1, wKTo1, wRFrom1, wRTo1 *int16,
