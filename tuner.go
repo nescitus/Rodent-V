@@ -13,8 +13,8 @@ package main
 //   - passedBonusMG/EG[blocked][relative rank]
 //   - ourPasserProximityMG/EG
 //   - theirPasserProximityMG/EG
-//   - phalanxMG/EG[64] (ranks 1 and 8 fixed zero; ranks 2..7 tunable)
-//   - pawnAdjust / knightAdjust / bishopAdjust center-pattern tables (MG only)
+//   - phalanxMG/EG[64] (ranks 1 and 8 plus a-file fixed zero; ranks 2..7, files b..h tunable)
+//   - pawnAdjust / knightAdjust / bishopAdjust center-pattern tables (MG only; pawn files compacted per center)
 //   - king pawn shield / enemy pawn storm terms (MG only)
 //
 // Everything else is frozen from the CURRENT eval_internal().
@@ -23,7 +23,6 @@ package main
 //	 - threats
 //	 - king safety
 //	 - assorted pawn weaknesses
-//	 - king's pawn shield and pawn storm
 //	 - rook bonuses
 //
 // Entry point:
@@ -47,39 +46,126 @@ import (
 // Please note that we try to keep pst tables
 // near 0, and as a compensation we change
 // material values.
-var tuneMaterial bool = true
+var tuneMaterial bool = false
 var tunePST bool = false
 var tuneMobility bool = false
 var tunePassers bool = false
 var tunePhalanx bool = false
-var tuneAdjustments bool = false
-var tuneShield bool = true
+var tuneAdjustments bool = true
+var tuneShield bool = false
 var tunePawnWeaknesses bool = false
 
 type ctPair [2]float64
 
 const ctAdjustSquares = 40 // relative ranks 1..5; ranks 6..8 are fixed at zero
 const ctPawnAdjustStart = 8
-const ctPawnAdjustSquares = ctAdjustSquares - ctPawnAdjustStart // ranks 2..5
-const ctPhalanxStart = 8                                        // first square of relative rank 2
-const ctPhalanxEnd = 56                                         // first square of relative rank 8
-const ctPhalanxSquares = ctPhalanxEnd - ctPhalanxStart          // ranks 2..7
+const ctPawnAdjustRanks = 4 // relative ranks 2..5
+
+// Pawn center-adjustment file masks.
+// Bit 0 = file a, bit 7 = file h.
+// Unknown/unlisted center types keep all files.
+func ctPawnAdjustFileMask(center int) uint8 {
+	switch center {
+	case int(KID_low), int(KID_high), int(FRENCH_low), int(FRENCH_high):
+		return 0b11100111 // no d/e pawns
+	case int(SICILIAN_low):
+		return 0b11111011 // no c-pawn
+	case int(SICILIAN_high):
+		return 0b11110111 // no d-pawn
+	default:
+		return 0b11111111
+	}
+}
+
+func ctMaskFileCount(mask uint8) int {
+	n := 0
+	for mask != 0 {
+		mask &= mask - 1
+		n++
+	}
+	return n
+}
+
+func ctPawnAdjustCenterSize(center int) int {
+	return 2 * ctPawnAdjustRanks * ctMaskFileCount(ctPawnAdjustFileMask(center))
+}
+
+func ctPawnAdjustCenterOffset(center int) int {
+	off := 0
+	for c := 0; c < center; c++ {
+		off += ctPawnAdjustCenterSize(c)
+	}
+	return off
+}
+
+func ctPawnAdjustTotalSize() int {
+	n := 0
+	for center := 0; center < len(pawnAdjust); center++ {
+		n += ctPawnAdjustCenterSize(center)
+	}
+	return n
+}
+
+func ctPawnAdjustCompactFile(mask uint8, file int) (int, bool) {
+	if file < 0 || file > 7 || mask&(uint8(1)<<uint(file)) == 0 {
+		return 0, false
+	}
+
+	idx := 0
+	for f := 0; f < file; f++ {
+		if mask&(uint8(1)<<uint(f)) != 0 {
+			idx++
+		}
+	}
+	return idx, true
+}
+
+const ctPhalanxStart = 8                                 // first square of relative rank 2
+const ctPhalanxEnd = 56                                  // first square of relative rank 8
+const ctPhalanxFiles = 7                                 // files b..h; a-file is dead
+const ctPhalanxRanks = 6                                 // relative ranks 2..7
+const ctPhalanxSquares = ctPhalanxRanks * ctPhalanxFiles // 42 compact entries
+
+// Compact PST storage:
+//   - pawn: only relative ranks 2..7 are reachable (48 squares)
+//   - knight/bishop/rook/queen: all 64 squares
+//   - king: normalization always mirrors our king onto files e..h (32 squares)
+const ctPSTPawnSquares = 48
+const ctPSTFullPieces = 4 // N, B, R, Q
+const ctPSTKingSquares = 32
+const ctPSTKingBase = ctPSTPawnSquares + ctPSTFullPieces*64
+const ctPSTBlockSize = ctPSTKingBase + ctPSTKingSquares
 
 type ctCoeff struct {
 	index uint16
 	value int16
 }
 
+type ctResult uint8
+
+const (
+	ctLoss ctResult = iota
+	ctDraw
+	ctWin
+)
+
+func (r ctResult) score() float64 {
+	return float64(r) * 0.5
+}
+
 type ctEntry struct {
-	result     float64 // game result: 1.0 = White win, 0.5 = draw, 0.0 = Black win.
+	// Field order keeps ctEntry compact on 64-bit systems.
+	// scale stores the exact integer drawishness percentage (1..100).
 	frozen     float64 // part of current eval that isn't retuned: fullEval - scale * tunablePart(initialParams).
-	scale      float64 // eval drawishness scale applied to tunable terms, usually just 1.0
-	phase      uint8   // game phase for linear interpolation
 	coeffStart uint32  // Start index of this position's sparse coefficient list in ctDataset.coeffs.
 	coeffCount uint16  // number of sparse coefficients in this position
 
 	// Packed branch decisions for pawnShieldMG(), one byte per relevant file.
 	shieldDesc [2][3]uint8
+
+	result ctResult
+	phase  uint8 // game phase for linear interpolation
+	scale  uint8 // drawishness percentage, 1..100
 }
 
 type ctDataset struct {
@@ -89,9 +175,9 @@ type ctDataset struct {
 
 type ctLayout struct {
 	pieceVal    int // 5 entries: P..Q
-	pstSame     int // 6*64, MG-only
-	pstOpposite int // 6*64, MG-only
-	pstEG       int // 6*64, EG-only
+	pstSame     int // P: 48, N..Q: 4*64, K: 32 reachable squares, MG-only
+	pstOpposite int // P: 48, N..Q: 4*64, K: 32 reachable squares, MG-only
+	pstEG       int // P: 48, N..Q: 4*64, K: 32 reachable squares, EG-only
 
 	nMob int
 	bMob int
@@ -106,10 +192,10 @@ type ctLayout struct {
 	passed    int // 2*8
 	ourProx   int // 8
 	theirProx int // 8
-	phalanx   int // ctPhalanxSquares (relative ranks 2..7)
+	phalanx   int // ctPhalanxSquares (relative ranks 2..7, files b..h)
 
 	// Center-pattern adjustment tables (MG-only)
-	pawnAdjust   int // len(pawnAdjust)*2*ctPawnAdjustSquares
+	pawnAdjust   int // compact center-specific file masks, ranks 2..5
 	knightAdjust int // len(knightAdjust)*2*ctAdjustSquares
 	bishopAdjust int // len(bishopAdjust)*2*ctAdjustSquares
 
@@ -154,6 +240,21 @@ func ctParamEnabled(i int, l ctLayout, mask ctTuneMask) bool {
 	default:
 		return false
 	}
+}
+
+func ctCountTunableScalars(l ctLayout) int {
+	mask := ctTuneMask{
+		material:     true,
+		pst:          true,
+		mobility:     true,
+		passers:      true,
+		phalanx:      true,
+		adjustments:  true,
+		shield:       true,
+		pawnWeakness: true,
+	}
+
+	return ctCountEnabledScalars(l, mask)
 }
 
 func ctCountEnabled(l ctLayout, mask ctTuneMask) int {
@@ -206,10 +307,10 @@ func ctMakeLayout() ctLayout {
 
 	l.pieceVal = 0
 	l.pstSame = l.pieceVal + 5
-	l.pstOpposite = l.pstSame + 6*64
-	l.pstEG = l.pstOpposite + 6*64
+	l.pstOpposite = l.pstSame + ctPSTBlockSize
+	l.pstEG = l.pstOpposite + ctPSTBlockSize
 
-	l.nMob = l.pstEG + 6*64
+	l.nMob = l.pstEG + ctPSTBlockSize
 	l.bMob = l.nMob + len(nMobMg)
 	l.rMob = l.bMob + len(bMobMg)
 	l.qMob = l.rMob + len(rMobMg)
@@ -225,7 +326,7 @@ func ctMakeLayout() ctLayout {
 	l.phalanx = l.theirProx + 8
 
 	l.pawnAdjust = l.phalanx + ctPhalanxSquares
-	l.knightAdjust = l.pawnAdjust + len(pawnAdjust)*2*ctPawnAdjustSquares
+	l.knightAdjust = l.pawnAdjust + ctPawnAdjustTotalSize()
 	l.bishopAdjust = l.knightAdjust + len(knightAdjust)*2*ctAdjustSquares
 	l.shield = l.bishopAdjust + len(bishopAdjust)*2*ctAdjustSquares
 	l.pawnWeak = l.shield + 11
@@ -248,13 +349,26 @@ func ctWorkers() int {
 
 // ctParseResult extracts the game result from an EPD record,
 // accepting the result formats used by our different tuning sets.
-func ctParseResult(line string) float64 {
+func ctResultFromFloat(x float64) ctResult {
+	switch x {
+	case 0.0:
+		return ctLoss
+	case 1.0:
+		return ctWin
+	default:
+		// Draw is the only other valid training result (0.5). Keep the old
+		// fallback behavior for malformed/unknown numeric results.
+		return ctDraw
+	}
+}
+
+func ctParseResult(line string) ctResult {
 
 	// Bracketed numeric result, e.g. [0.0], [0.5], [1.0].
 	if lb := strings.LastIndex(line, "["); lb != -1 {
 		if rb := strings.LastIndex(line, "]"); rb > lb {
 			if x, err := strconv.ParseFloat(strings.TrimSpace(line[lb+1:rb]), 64); err == nil {
-				return x
+				return ctResultFromFloat(x)
 			}
 		}
 	}
@@ -262,23 +376,23 @@ func ctParseResult(line string) float64 {
 	// Numeric result after semicolon, e.g. ; 0.5
 	if idx := strings.LastIndex(line, ";"); idx != -1 {
 		if x, err := strconv.ParseFloat(strings.TrimSpace(line[idx+1:]), 64); err == nil {
-			return x
+			return ctResultFromFloat(x)
 		}
 	}
 
 	// Zurichess-style result token.
 	if strings.Contains(line, "1-0") {
-		return 1.0
+		return ctWin
 	}
 	if strings.Contains(line, "0-1") {
-		return 0.0
+		return ctLoss
 	}
 	if strings.Contains(line, "1/2-1/2") {
-		return 0.5
+		return ctDraw
 	}
 
 	// perhaps should panic instead
-	return 0.5
+	return ctDraw
 }
 
 func ctInitParams(l ctLayout) []ctPair {
@@ -291,17 +405,23 @@ func ctInitParams(l ctLayout) []ctPair {
 		}
 	}
 
-	// Wing-conditioned PSTs. The evaluator chooses one MG table from
-	// king-wing geometry, while endgame uses one shared PST.
+	// Wing-conditioned PSTs. Pawn ranks 1 and 8 are unreachable and omitted.
+	// N..Q keep all 64 squares. The king is flattened to the 32 reachable
+	// normalized squares on files e..h.
 	for piece := P; piece <= K; piece++ {
 		for sq := 0; sq < 64; sq++ {
-			p[l.pstSame+piece*64+sq] = ctPair{
+			off, ok := ctPSTIndex(piece, sq)
+			if !ok {
+				continue
+			}
+
+			p[l.pstSame+off] = ctPair{
 				float64(mgPSQTSame[piece][sq]), 0,
 			}
-			p[l.pstOpposite+piece*64+sq] = ctPair{
+			p[l.pstOpposite+off] = ctPair{
 				float64(mgPSQTOpposite[piece][sq]), 0,
 			}
-			p[l.pstEG+piece*64+sq] = ctPair{
+			p[l.pstEG+off] = ctPair{
 				0, float64(egPSQT[piece][sq]),
 			}
 		}
@@ -358,15 +478,18 @@ func ctInitParams(l ctLayout) []ctPair {
 	}
 
 	for pstSq := ctPhalanxStart; pstSq < ctPhalanxEnd; pstSq++ {
-		i := l.phalanx + (pstSq - ctPhalanxStart)
-		p[i] = ctPair{
+		phIdx, ok := ctPhalanxIndex(pstSq)
+		if !ok {
+			continue
+		}
+		p[l.phalanx+phIdx] = ctPair{
 			float64(phalanxMG[pstSq]),
 			float64(phalanxEG[pstSq]),
 		}
 	}
 
-	// Center-pattern adjustments are MG-only. Only relative ranks 1..5 are stored;
-	// relative ranks 6..8 are fixed at zero. EG stays exactly zero.
+	// Pawn center adjustments are MG-only. Relative ranks 2..5 are stored,
+	// with structurally impossible files omitted per center type.
 	for center := 0; center < len(pawnAdjust); center++ {
 		for side := White; side <= Black; side++ {
 			for canonicalSq := ctPawnAdjustStart; canonicalSq < ctAdjustSquares; canonicalSq++ {
@@ -374,7 +497,11 @@ func ctInitParams(l ctLayout) []ctPair {
 				if side == Black {
 					engineSq ^= 56
 				}
-				i := l.pawnAdjust + (center*2+side)*ctPawnAdjustSquares + (canonicalSq - ctPawnAdjustStart)
+
+				i, ok := ctPawnAdjustIndex(l.pawnAdjust, center, side, engineSq)
+				if !ok {
+					continue
+				}
 				p[i] = ctPair{float64(pawnAdjust[center][side][engineSq]), 0}
 			}
 		}
@@ -463,14 +590,40 @@ func ctPawnAdjustIndex(base, center, side, sq int) (int, bool) {
 	if canonicalSq < ctPawnAdjustStart || canonicalSq >= ctAdjustSquares {
 		return 0, false
 	}
-	return base + (center*2+side)*ctPawnAdjustSquares + (canonicalSq - ctPawnAdjustStart), true
+
+	rank := rankOf(canonicalSq) // 1..4 = relative ranks 2..5
+	file := fileOf(canonicalSq)
+
+	mask := ctPawnAdjustFileMask(center)
+	fileIdx, ok := ctPawnAdjustCompactFile(mask, file)
+	if !ok {
+		return 0, false
+	}
+
+	files := ctMaskFileCount(mask)
+	centerBase := ctPawnAdjustCenterOffset(center)
+
+	return base +
+		centerBase +
+		side*(ctPawnAdjustRanks*files) +
+		(rank-1)*files +
+		fileIdx, true
 }
 
 func ctPhalanxIndex(pstSq int) (int, bool) {
 	if pstSq < ctPhalanxStart || pstSq >= ctPhalanxEnd {
 		return 0, false
 	}
-	return pstSq - ctPhalanxStart, true
+
+	file := fileOf(pstSq)
+	if file == 0 {
+		// A phalanx is counted on its eastern pawn, so the a-file can
+		// never carry a coefficient.
+		return 0, false
+	}
+
+	rank := rankOf(pstSq) // 1..6 for relative ranks 2..7
+	return (rank-1)*ctPhalanxFiles + (file - 1), true
 }
 
 // Shield/storm offsets inside l.shield.
@@ -652,6 +805,33 @@ func ctShieldDeriv(desc [3]uint8) [11]float64 {
 	return g
 }
 
+// Return the compact index within one PST block. P..Q use 64 squares;
+// the normalized king can only occur on files e..h, stored as 8x4 = 32.
+func ctPSTIndex(piece, sq int) (int, bool) {
+	switch piece {
+	case P:
+		rank := rankOf(sq)
+		if rank == 0 || rank == 7 {
+			return 0, false
+		}
+		// Relative ranks 2..7 -> compact ranks 0..5.
+		return (rank-1)*8 + fileOf(sq), true
+
+	case N, B, R, Q:
+		// Four complete 64-square blocks follow the compact pawn block.
+		return ctPSTPawnSquares + (piece-N)*64 + sq, true
+
+	case K:
+		file := fileOf(sq)
+		if file < 4 {
+			return 0, false
+		}
+		return ctPSTKingBase + rankOf(sq)*4 + (file - 4), true
+	}
+
+	return 0, false
+}
+
 // Sparse builder for one position.
 // Dense is cheap here because parameter count is only ~450.
 func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoeff {
@@ -682,14 +862,18 @@ func ctCoefficients(pos *Pos, l ctLayout, dense []int16, out []ctCoeff) []ctCoef
 		// the MG table from same-wing / opposite-wing king geometry.
 		addPSTCoeff := func(piece, sq int) {
 			nsq := normalizeSquare(pos, side, sq)
-
-			if pstBucket == SameWing {
-				addCoeff(l.pstSame+piece*64+nsq, sign)
-			} else {
-				addCoeff(l.pstOpposite+piece*64+nsq, sign)
+			off, ok := ctPSTIndex(piece, nsq)
+			if !ok {
+				panic("ct tuner: normalized PST square is unreachable")
 			}
 
-			addCoeff(l.pstEG+piece*64+nsq, sign)
+			if pstBucket == SameWing {
+				addCoeff(l.pstSame+off, sign)
+			} else {
+				addCoeff(l.pstOpposite+off, sign)
+			}
+
+			addCoeff(l.pstEG+off, sign)
 		}
 
 		// Match the current eval's slider mobility exactly, including its
@@ -947,25 +1131,31 @@ func ctScore(data *ctDataset, e *ctEntry, params []ctPair, l ctLayout) float64 {
 	shieldSelected := ctShieldScore(e.shieldDesc[White], params, l) -
 		ctShieldScore(e.shieldDesc[Black], params, l)
 	selected += shieldSelected * float64(e.phase) / 24.0
-	return e.frozen + e.scale*selected
+	return e.frozen + ctScale(e)*selected
 }
 
 // Mirrors the current drawish scaling for phase < 7.
-// The branch is frozen from the current engine score's White-POV sign.
-func ctLinearScale(pos *Pos, phase int, engineWhiteScore float64) float64 {
+// Store the exact integer percentage so every entry needs only one byte.
+func ctLinearScale(pos *Pos, phase int, engineWhiteScore float64) uint8 {
 	if phase >= 7 || engineWhiteScore == 0 {
-		return 1.0
+		return 100
 	}
 
 	weight := 100
-
 	if engineWhiteScore > 0 {
 		weight = getDrawishness(pos, White, Black)
 	} else {
 		weight = getDrawishness(pos, Black, White)
 	}
 
-	return float64(weight) / 100.0
+	if weight < 1 || weight > 100 {
+		panic(fmt.Sprintf("ct tuner: drawishness scale %d outside [1,100]", weight))
+	}
+	return uint8(weight)
+}
+
+func ctScale(e *ctEntry) float64 {
+	return float64(e.scale) / 100.0
 }
 
 // Stream input file directly into compact dataset.
@@ -1021,6 +1211,7 @@ func ctLoadDataset(filename string, initParams []ctPair, l ctLayout) (*ctDataset
 		}
 
 		scale := ctLinearScale(&pos, phase, engineScore)
+		scaleF := float64(scale) / 100.0
 
 		selected := ctSelectedScore(tmpCoeffs, initParams, phase, l)
 		shieldDesc := [2][3]uint8{
@@ -1030,7 +1221,7 @@ func ctLoadDataset(filename string, initParams []ctPair, l ctLayout) (*ctDataset
 		shieldSelected := ctShieldScore(shieldDesc[White], initParams, l) -
 			ctShieldScore(shieldDesc[Black], initParams, l)
 		selected += shieldSelected * float64(phase) / 24.0
-		frozen := engineScore - scale*selected
+		frozen := engineScore - scaleF*selected
 
 		start := len(data.coeffs)
 		data.coeffs = append(data.coeffs, tmpCoeffs...)
@@ -1048,7 +1239,7 @@ func ctLoadDataset(filename string, initParams []ctPair, l ctLayout) (*ctDataset
 		data.entries = append(data.entries, entry)
 
 		// Reconstruction parity sanity check.
-		reconstructed := frozen + scale*selected
+		reconstructed := frozen + scaleF*selected
 		d := math.Abs(reconstructed - engineScore)
 
 		paritySum += d
@@ -1119,7 +1310,7 @@ func ctMSE(data *ctDataset, params, initial []ctPair, l ctLayout, mask ctTuneMas
 			sum := 0.0
 			for i := start; i < end; i++ {
 				e := &data.entries[i]
-				d := e.result - ctSigmoid(ctScore(data, e, params, l), k)
+				d := e.result.score() - ctSigmoid(ctScore(data, e, params, l), k)
 				sum += d * d
 			}
 			totals[wid] = sum
@@ -1282,13 +1473,14 @@ func ctEpoch(
 				e := &data.entries[i]
 				score := ctScore(data, e, params, l)
 				pred := ctSigmoid(score, k)
-				diff := pred - e.result
+				diff := pred - e.result.score()
 				r.loss += diff * diff
 
 				dLoss := 2.0 * diff * ctSigDeriv(score, k)
 				phase := float64(e.phase)
-				mgF := e.scale * phase / 24.0
-				egF := e.scale * (24.0 - phase) / 24.0
+				scale := ctScale(e)
+				mgF := scale * phase / 24.0
+				egF := scale * (24.0 - phase) / 24.0
 
 				for _, c := range ctEntryCoeffs(data, e) {
 					idx := int(c.index)
@@ -1380,32 +1572,42 @@ func ctRecenterPST(params []ctPair, l ctLayout) []ctPair {
 	n := append([]ctPair(nil), params...)
 
 	for piece := P; piece <= K; piece++ {
-		// Same/Opposite MG tables share one common offset. Removing one
-		// mean from both preserves their relative bucket bias, and that
-		// common component can be moved into the shared material value.
 		mgSum := 0.0
-		for sq := 0; sq < 64; sq++ {
-			mgSum += n[l.pstSame+piece*64+sq][0]
-			mgSum += n[l.pstOpposite+piece*64+sq][0]
-		}
-		mgMean := mgSum / 128.0
-
-		for sq := 0; sq < 64; sq++ {
-			n[l.pstSame+piece*64+sq][0] -= mgMean
-			n[l.pstOpposite+piece*64+sq][0] -= mgMean
-		}
-
-		// Endgame has one shared table.
 		egSum := 0.0
-		for sq := 0; sq < 64; sq++ {
-			egSum += n[l.pstEG+piece*64+sq][1]
-		}
-		egMean := egSum / 64.0
+		count := 0
 
 		for sq := 0; sq < 64; sq++ {
-			n[l.pstEG+piece*64+sq][1] -= egMean
+			off, ok := ctPSTIndex(piece, sq)
+			if !ok {
+				continue
+			}
+
+			mgSum += n[l.pstSame+off][0]
+			mgSum += n[l.pstOpposite+off][0]
+			egSum += n[l.pstEG+off][1]
+			count++
 		}
 
+		if count == 0 {
+			continue
+		}
+
+		// Same/Opposite MG tables share one common offset.
+		mgMean := mgSum / float64(2*count)
+		egMean := egSum / float64(count)
+
+		for sq := 0; sq < 64; sq++ {
+			off, ok := ctPSTIndex(piece, sq)
+			if !ok {
+				continue
+			}
+
+			n[l.pstSame+off][0] -= mgMean
+			n[l.pstOpposite+off][0] -= mgMean
+			n[l.pstEG+off][1] -= egMean
+		}
+
+		// P..Q have material values that absorb the common PST offsets.
 		if piece <= Q {
 			n[l.pieceVal+piece][0] += mgMean
 			n[l.pieceVal+piece][1] += egMean
@@ -1668,6 +1870,34 @@ func ctPrintNamedAdjustTable(name string, n []ctPair, start, center, firstSq, sq
 	fmt.Println("}")
 }
 
+func ctPrintNamedPawnAdjustTable(name string, n []ctPair, start, center int) {
+	fmt.Println()
+	fmt.Printf("var %s = [64]int{\n", name)
+
+	for rank := 0; rank < 8; rank++ {
+		fmt.Print("\t")
+		for file := 0; file < 8; file++ {
+			if file != 0 {
+				fmt.Print(", ")
+			}
+
+			canonicalSq := rank*8 + file
+			v := 0.0
+
+			whiteIdx, whiteOK := ctPawnAdjustIndex(start, center, White, canonicalSq)
+			blackIdx, blackOK := ctPawnAdjustIndex(start, center, Black, canonicalSq^56)
+			if whiteOK && blackOK {
+				v = (n[whiteIdx][0] + n[blackIdx][0]) / 2.0
+			}
+
+			fmt.Printf("%4d", ctRound(v))
+		}
+		fmt.Println(",")
+	}
+
+	fmt.Println("}")
+}
+
 func ctPrintAdjustments(n []ctPair, l ctLayout) {
 	// CenterType order:
 	// 0 KID_low, 1 KID_high,
@@ -1689,7 +1919,7 @@ func ctPrintAdjustments(n []ctPair, l ctLayout) {
 		{int(CLASSIC_e4e5), "e4e5P"},
 		{int(CLASSIC_d4d5), "d4d5P"},
 	} {
-		ctPrintNamedAdjustTable(t.name, n, l.pawnAdjust, t.center, ctPawnAdjustStart, ctPawnAdjustSquares)
+		ctPrintNamedPawnAdjustTable(t.name, n, l.pawnAdjust, t.center)
 	}
 
 	for _, t := range []struct {
@@ -1731,6 +1961,7 @@ func ctPrintPST(n []ctPair, l ctLayout) {
 	fmt.Println()
 	fmt.Println("// King-relative piece/square tables.")
 	fmt.Println("// MG uses same-wing and opposite-wing buckets; EG is shared.")
+	fmt.Println("// Pawn ranks 1/8 and king files a..d are unreachable and print as zero.")
 
 	type tableSpec struct {
 		name  string
@@ -1757,7 +1988,12 @@ func ctPrintPST(n []ctPair, l ctLayout) {
 					}
 
 					sq := rank*8 + file
-					fmt.Printf("%4d", ctRound(n[t.base+piece*64+sq][t.phase]))
+					off, ok := ctPSTIndex(piece, sq)
+					if !ok {
+						fmt.Printf("%4d", 0)
+						continue
+					}
+					fmt.Printf("%4d", ctRound(n[t.base+off][t.phase]))
 				}
 
 				fmt.Println(",")
@@ -1807,9 +2043,10 @@ func ctTune(filename string, epochs int, lr float64, lambda float64) {
 	}
 
 	fmt.Printf(
-		"[core-tuner] %d parameter pairs, %d enabled, %d workers\n",
+		"[core-tuner] %d storage slots, %d tunable params, %d currently tuned, %d workers\n",
 		l.num,
-		ctCountEnabled(l, mask),
+		ctCountTunableScalars(l),
+		ctCountEnabledScalars(l, mask),
 		ctWorkers(),
 	)
 	fmt.Printf(
