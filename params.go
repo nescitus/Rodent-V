@@ -126,6 +126,17 @@ var (
  stormNoPawn = 6
 )
 
+// --- Space and King Corridor Obstruction (MG only) ---
+// spaceWeightMG: bonus per safe square controlled in central/flank ranks 4-6.
+// umbrellaPenaltyMG: penalty when an advanced rammed pawn shields the enemy king.
+// sliderChokedPenaltyMG: penalty for each friendly slider (Q, R, B) whose direct
+// ray to the enemy king is physically blocked by an advanced rammed friendly pawn.
+var (
+	spaceWeightMG         = 3
+	umbrellaPenaltyMG     = 12
+	sliderChokedPenaltyMG = 14
+)
+
 // Threat scores reward the side whose pieces attack undefended or
 // poorly-defended enemy pieces.  The bonus depends on:
 //   - what piece type is doing the attacking

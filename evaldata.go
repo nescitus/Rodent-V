@@ -12,6 +12,7 @@ const (
 	EvalPawns
 	EvalPassers
 	EvalThreats
+	EvalSpace
 	EvalOther
 	EvalComponentN
 )
@@ -24,6 +25,7 @@ var evalComponentName = [EvalComponentN]string{
 	EvalPawns:    "Pawns",
 	EvalPassers:  "Passers",
 	EvalThreats:  "Threats",
+	EvalSpace:    "Space",
 	EvalOther:    "Other",
 }
 

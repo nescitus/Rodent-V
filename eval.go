@@ -280,6 +280,10 @@ func eval_internal(p *Pos, shouldReport bool, ss *SearchState) int {
 	evaluateThreats(p, &e, White)
 	evaluateThreats(p, &e, Black)
 
+	// Space advantage and king corridor obstruction
+	evaluateSpace(p, &e, White)
+	evaluateSpace(p, &e, Black)
+
 	// Material imbalance eval
 
 	wMinors := p.count[White][N] + p.count[White][B]
@@ -998,6 +1002,116 @@ func evaluateThreats(p *Pos, e *EvalData, side int) {
 	}
 	cnt := popCount(pushThreatBB & nonPawnEnemies)
 	add(e, side, EvalThreats, cnt*pushThreatMG, cnt*pushThreatEG)
+}
+
+// evaluateSpace scores territorial space advantage while penalizing
+// advanced rammed pawns that shield the enemy king and choke friendly
+// slider attack corridors (the "umbrella effect").
+func evaluateSpace(p *Pos, e *EvalData, side int) {
+	enemy := opp(side)
+	ownPawns := p.pieceBB(side, P)
+	enemyPawns := p.pieceBB(enemy, P)
+	enemyKingSq := p.kingSq[enemy]
+	kingZone := squareBit(enemyKingSq) | e.kingRing[enemy]
+
+	// 1. Raw Space: Controlled territory on central and flank files (C through G)
+	// For White: Ranks 4, 5, 6. For Black: Ranks 5, 4, 3.
+	var spaceMask uint64
+	if side == White {
+		spaceMask = (rank4BB | rank5BB | rank6BB) & (fileCBB | fileDBB | fileEBB | fileFBB | fileGBB)
+	} else {
+		spaceMask = (rank5BB | rank4BB | rank3BB) & (fileCBB | fileDBB | fileEBB | fileFBB | fileGBB)
+	}
+
+	// Safe territory: squares controlled by friendly pawns/pieces or occupied by friendly pawns,
+	// and NOT attacked by enemy pawns.
+	safeTerritory := spaceMask & (e.attacked[side] | ownPawns) &^ e.attackedBy[enemy][P]
+	rawSpaceCount := popCount(safeTerritory)
+
+	// 2. Detect Rammed / Locked Advanced Pawns:
+	// Advanced pawns: White on ranks 5-6, Black on ranks 4-3
+	var advancedPawns uint64
+	if side == White {
+		advancedPawns = ownPawns & (rank5BB | rank6BB)
+	} else {
+		advancedPawns = ownPawns & (rank4BB | rank3BB)
+	}
+
+	umbrellaCount := 0
+	chokedSliders := 0
+
+	for bb := advancedPawns; bb != 0; {
+		pawnSq := lsb(bb)
+		bb &= bb - 1
+
+		pushSq := getPushSq(side, pawnSq)
+		// Is the pawn frontally rammed by an enemy pawn?
+		if pushSq >= 0 && pushSq < 64 && (enemyPawns&squareBit(pushSq) != 0) {
+			pawnBit := squareBit(pawnSq)
+
+			// Umbrella check: does this rammed pawn sit in front of the enemy king's sector?
+			pawnFile := fileOf(pawnSq)
+			kingFile := fileOf(enemyKingSq)
+			if abs(pawnFile-kingFile) <= 2 {
+				if (side == White && rankOf(enemyKingSq) >= rank6) || (side == Black && rankOf(enemyKingSq) <= rank3) {
+					umbrellaCount++
+				}
+			}
+
+			// Choked slider check: check friendly sliders (B, R, Q)
+			for _, sliderType := range []int{B, R, Q} {
+				sliders := p.pieceBB(side, sliderType)
+				for sbb := sliders; sbb != 0; {
+					sliderSq := lsb(sbb)
+					sbb &= sbb - 1
+
+					// Can this slider attack in the direction of the pawn?
+					canAttackPawn := false
+					if sliderType == B || sliderType == Q {
+						if bishopAttacks(0, sliderSq)&pawnBit != 0 {
+							canAttackPawn = true
+						}
+					}
+					if sliderType == R || sliderType == Q {
+						if rookAttacks(0, sliderSq)&pawnBit != 0 {
+							canAttackPawn = true
+						}
+					}
+					if !canAttackPawn {
+						continue
+					}
+
+					// Check if the ray through this pawn hits the enemy king zone
+					line := LineBB[sliderSq][pawnSq]
+					intersect := line & kingZone
+					for intersect != 0 {
+						targetSq := lsb(intersect)
+						intersect &= intersect - 1
+						if (BetweenBB[sliderSq][targetSq] & pawnBit) != 0 {
+							chokedSliders++
+							break // Count this slider once per rammed pawn
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Compute net score (Middlegame only, EG is 0)
+	mgScore := rawSpaceCount * spaceWeightMG
+
+	// If our rammed pawns choke our attacking lines:
+	if chokedSliders > 0 {
+		// Discount raw space: 1 choked slider retains 2/3, 2 retains 1/3, 3+ retains 0
+		retention := 3 - minOf(chokedSliders, 3)
+		mgScore = mgScore * retention / 3
+
+		// Apply penalties for the obstruction and umbrella effect
+		penalty := (umbrellaCount * umbrellaPenaltyMG) + (chokedSliders * sliderChokedPenaltyMG)
+		mgScore -= penalty
+	}
+
+	add(e, side, EvalSpace, mgScore, 0)
 }
 
 // --- Helpers ---
