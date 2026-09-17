@@ -272,6 +272,11 @@ func eval_internal(p *Pos, shouldReport bool, ss *SearchState) int {
 	evaluatePassers(p, &e, White)
 	evaluatePassers(p, &e, Black)
 
+	// king safety needs attack update here,
+	// not within evaluateKing(), for the latter to be fully symmetric
+	e.addAttacks(White, K, kingAtk[p.kingSq[White]])
+	e.addAttacks(Black, K, kingAtk[p.kingSq[Black]])
+
 	// King safety evaluation (~36 Elo)
 	evaluateKing(p, &e, White)
 	evaluateKing(p, &e, Black)
@@ -814,7 +819,7 @@ func pawnShieldMG(p *Pos, side int) int {
 		// pawns protecting the king should not advance,
 		// so they are penalized for it
 		if hasPawnR2 {
-			penalty = shieldRank2
+			penalty += shieldRank2
 		} else if hasPawnR3 {
 			penalty += shieldRank3				
 		} else if hasPawnR4 {
