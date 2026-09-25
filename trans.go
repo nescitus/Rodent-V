@@ -64,6 +64,7 @@ package main
 
 import (
 	"math"
+	"runtime"
 	"runtime/debug"
 	"sync/atomic"
 	"unsafe"
@@ -112,28 +113,29 @@ func unpackTTData(d uint64) (move, score, depth, bound, date int) {
 
 // ---- TT management ----
 
-// alloc allocates a transposition table sized as a power of 2 so the
-// index mask trick works: the loop below finds the smallest power of 2
-// STRICTLY GREATER than mbSize, e.g. alloc(16) allocates 32 MiB, not 16.
-// (mbSize itself is not a valid result even when it's already a power of
-// 2, since the loop condition is size<=mbSize.) This is deliberately
-// left as-is rather than "fixed" to allocate mbSize or less: every call
-// site already assumes today's effective sizes, and changing them would
-// shrink the TT for a given Hash setting, which is a search-tree-visible
-// behavior change requiring its own non-regression test -- see
-// updateMemoryLimit for where this is accounted for correctly. Always
-// clears the table.
+// alloc allocates a transposition table sized as the largest power of 2
+// less than or equal to mbSize so that allocated memory never exceeds
+// the user-requested Hash size.
 func (t *TTable) alloc(mbSize int) {
-	size := 2
-	for size <= mbSize {
-		size *= 2
+	if mbSize < 1 {
+		mbSize = 1
+	}
+	size := 1
+	for (size << 1) <= mbSize {
+		size <<= 1
 	}
 	// Each entry is 8 bytes; allocate size MiB worth.
 	newSize := (size << 20) / 8
 
-	if t.size == newSize {
+	if t.size == newSize && len(t.entries) == newSize {
 		return // Size unchanged, don't reallocate or wipe the TT
 	}
+
+	// Release previous table before allocating the new one to prevent
+	// old and new tables from coexisting in memory simultaneously.
+	t.entries = nil
+	runtime.GC()
+	debug.FreeOSMemory()
 
 	t.size = newSize
 	t.mask = t.size - 4
@@ -175,12 +177,11 @@ func (t *TTable) hashfull() int {
 	return (active * 1000) / sampleSize
 }
 
-// updateMemoryLimit resizes the Go soft memory limit to the engine's real
-// live heap plus headroom. hashBytes below is deliberately the table's
-// actual allocated size (t.size * entry size), not currentHashMB*1MB --
-// alloc() always rounds up to a power of 2 strictly greater than the
-// requested MB (see alloc's comment), so accounting the requested size
-// would undercount by up to 2x.
+// updateMemoryLimit resizes the Go soft memory limit (GOMEMLIMIT) to the
+// engine's live heap plus a fixed, modest headroom (64 MB) for search scratch
+// buffers, stack frames, and UCI output. This ensures total process memory
+// strictly adheres to the requested Hash allocation and prevents Go GC from
+// allowing memory to grow to 2x live heap.
 func updateMemoryLimit() {
 	hashBytes := int64(mainTT.size) * int64(unsafe.Sizeof(Entry{}))
 	threadBytes := int64(numThreads) * searchStateSize
@@ -188,13 +189,9 @@ func updateMemoryLimit() {
 	bookBytes := int64(len(mainBook.entries)+len(guideBook.entries)) * int64(unsafe.Sizeof(PolyglotEntry{}))
 	liveBytes := hashBytes + threadBytes + nnueBytes + bookBytes
 
-	const minHeadroomMB = 64
-	headroom := liveBytes
-	if headroom < minHeadroomMB*1024*1024 {
-		headroom = minHeadroomMB * 1024 * 1024
-	}
+	const headroomBytes = int64(64 * 1024 * 1024)
 
-	debug.SetMemoryLimit(liveBytes + headroom)
+	debug.SetMemoryLimit(liveBytes + headroomBytes)
 }
 
 func allocTT(mbSize int) {

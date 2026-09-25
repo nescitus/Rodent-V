@@ -105,7 +105,7 @@ func uciLoop() {
 			fmt.Println("id author Naman Thanki, Pawel Koziol, based on Sungorus by Pablo Vazquez")
 
 			// these options should be always exposed
-			fmt.Println("option name Hash type spin default 16 min 1 max 4096")
+			fmt.Println("option name Hash type spin default 16 min 1 max 1048576")
 			fmt.Println("option name Clear Hash type button")
 			fmt.Println("option name UCI_Chess960 type check default false")
 			fmt.Println("option name UCI_LimitStrength type check default false")
@@ -322,6 +322,8 @@ func parseSetOption(tokens []string) {
 	case strings.EqualFold(name, "Hash"):
 		if mb, err := strconv.Atoi(value); err == nil {
 			allocTT(mb)
+			allocatedMB := (int64(mainTT.size) * 8) / (1024 * 1024)
+			fmt.Printf("info string Hash set to %d MB (%d entries)\n", allocatedMB, mainTT.size)
 		}
 		return
 
