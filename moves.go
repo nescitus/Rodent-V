@@ -49,9 +49,6 @@ package main
 // position: various hash keys, en passant square and data
 // needed to detect triple repetition.
 
-// info depth 30 seldepth 40 multipv 1 time 76154 nodes 82437783 nps 1082514 hashfull 1000 score cp 35 pv e2e4 c7c6 d2d4 d7d5 e4d5 c6d5 g1f3 g8f6 f1e2 a7a6 c2c3 c8f5 e1g1 e7e6 f3h4 f5g6 h4g6 h7g6 g2g3 f8d6 f1e1 e8g8 b1d2 d8c7 d2f3 b7b5
-// info depth 30 seldepth 40 multipv 1 time 74927 nodes 82437783 nps 1100241 hashfull 1000 score cp 35 pv e2e4 c7c6 d2d4 d7d5 e4d5 c6d5 g1f3 g8f6 f1e2 a7a6 c2c3 c8f5 e1g1 e7e6 f3h4 f5g6 h4g6 h7g6 g2g3 f8d6 f1e1 e8g8 b1d2 d8c7 d2f3 b7b5
-
 func makeMove(p *Pos, u *Update, r *Revert, move int) {
 	side := p.side
 	enemy := opp(side)
@@ -288,8 +285,8 @@ func unmakeMove(p *Pos, u *Update, r *Revert) {
 	fromBB := squareBit(from)
 	toBB := squareBit(to)
 
-	// The piece currently on "to" may be a promoted piece rather
-	// than the original moving pawn.
+	// The piece currently on "to" may be a promoted piece 
+	// rather than the original moving pawn.
 	pieceOnTo := u.movingType
 	if isPromotionFlag(r.flag) {
 		pieceOnTo = u.prom
