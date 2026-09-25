@@ -253,6 +253,7 @@ var (
 // King has value 0 because material balance only matters for the
 // five capturable piece types.
 var pieceValue = [7]int{100, 325, 325, 500, 1000, 0, 0}
+var rawValue = [7]int{100, 300, 300, 500, 900, 0, 0}
 
 // ================================================================
 // BIT MANIPULATION HELPERS

@@ -103,11 +103,12 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 	// --- Move the piece from -> to ---
 	// (handling castling completely separately is easier for FRC)
 	if moveType(move) != CASTLE {
+		piece :=  makePiece(side, u.movingType)
 		p.board[u.from] = NO_PC
-		p.board[u.to] = makePiece(side, u.movingType)
+		p.board[u.to] = piece
 	
-		hashDelta := zobPiece[makePiece(side, u.movingType)][u.from] ^
-					 zobPiece[makePiece(side, u.movingType)][u.to]
+		hashDelta := zobPiece[piece][u.from] ^
+					 zobPiece[piece][u.to]
 	
 		p.key ^= hashDelta
 		if u.movingType == P {
@@ -150,6 +151,7 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 		p.colorBB[enemy] ^= squareBit(u.to)
 		p.typeBB[u.captType] ^= squareBit(u.to)
 		p.count[enemy][u.captType]--
+		p.material -= rawValue[u.captType]
 		if isProm(move) {
 			u.flag = uPROMCAPT
 		} else {
@@ -228,12 +230,13 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 		p.colorBB[enemy] ^= squareBit(capSq)
 		p.typeBB[P] ^= squareBit(capSq)
 		p.count[enemy][P]--
+		p.material -= rawValue[P]
 
 	case EP_SET:
 		// Double pawn push: record the en-passant square if an enemy
 		// pawn can actually capture there next move.
 		epSq := u.to ^ 8
-		if pawnAtk[side][epSq]&p.pieceBB(enemy, P) != 0 {
+		if pawnAtk[side][epSq]&p.pawns(enemy) != 0 {
 			p.epSquare = epSq
 			p.key ^= zobEP[fileOf(epSq)]
 		}
@@ -245,21 +248,23 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 		}
 		promotedType := promType(move)
 		u.prom = promotedType
+		promKey := zobPiece[makePiece(side, promotedType)][u.to]
 		p.board[u.to] = makePiece(side, promotedType)
-		p.key ^= zobPiece[makePiece(side, P)][u.to] ^
-			zobPiece[makePiece(side, promotedType)][u.to]
+		p.key ^= zobPiece[makePiece(side, P)][u.to]^promKey
 		p.pawnKey[side] ^= zobPiece[makePiece(side, P)][u.to]
-		p.nonPawnKey[side] ^= zobPiece[makePiece(side, promotedType)][u.to]
+		p.nonPawnKey[side] ^= promKey
 		if promotedType == B || promotedType == N {
-			p.minorKey[side] ^= zobPiece[makePiece(side, promotedType)][u.to]
+			p.minorKey[side] ^= promKey
 		}
 		if promotedType == R || promotedType == Q {
-			p.majorKey[side] ^= zobPiece[makePiece(side, promotedType)][u.to]
+			p.majorKey[side] ^= promKey
 		}
 		p.typeBB[P] ^= squareBit(u.to)
 		p.typeBB[promotedType] ^= squareBit(u.to)
 		p.count[side][promotedType]++
 		p.count[side][P]--
+		p.material += rawValue[promotedType]
+		p.material -= rawValue[P]
 	}
 
 	p.side ^= 1
@@ -280,8 +285,8 @@ func unmakeMove(p *Pos, u *Update, r *Revert) {
 	fromBB := squareBit(from)
 	toBB := squareBit(to)
 
-	// The piece currently on "to" may be a promoted piece rather
-	// than the original moving pawn.
+	// The piece currently on "to" may be a promoted piece 
+	// rather than the original moving pawn.
 	pieceOnTo := u.movingType
 	if isPromotionFlag(r.flag) {
 		pieceOnTo = u.prom
@@ -321,6 +326,8 @@ func unmakeMove(p *Pos, u *Update, r *Revert) {
 	
 			p.count[side][pieceOnTo]--
 			p.count[side][P]++
+			p.material -= rawValue[pieceOnTo]
+			p.material += rawValue[P]
 		}
 	
 		if u.movingType == K {
@@ -340,6 +347,7 @@ func unmakeMove(p *Pos, u *Update, r *Revert) {
 			p.colorBB[enemy] ^= capBB
 			p.typeBB[P] ^= capBB
 			p.count[enemy][P]++
+			p.material += rawValue[P]
 	
 		default:
 			if u.captType != NO_TP {
@@ -347,6 +355,7 @@ func unmakeMove(p *Pos, u *Update, r *Revert) {
 				p.colorBB[enemy] ^= toBB
 				p.typeBB[u.captType] ^= toBB
 				p.count[enemy][u.captType]++
+				p.material += rawValue[u.captType]
 			} else {
 				p.board[to] = NO_PC
 			}

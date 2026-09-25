@@ -55,6 +55,7 @@ type Pos struct {
 	board          [64]int     // board[sq]: piece on that square, or NO_PC
 	kingSq         [2]int      // kingSq[c]: square of the king of color c
 	count          [2][6]int   // count[c][t] count of pieces of color c and type t
+	material       int         // total material on the board for NNUE scaling
 	side           int         // side to move: White or Black
 	castleRights   int         // castling availability: bit0=WK, bit1=WQ, bit2=BK, bit3=BQ
 	castleMask     [64]int     // dynamic castling mask for the current position
@@ -364,6 +365,7 @@ func parseFEN(p *Pos, epd string) {
 		p.clock = clock
 	}
 
+	p.material = computeMaterial(p)
 	p.key = computeZobrist(p)
 	p.pawnKey[White] = computePawnKey(p, White)
 	p.pawnKey[Black] = computePawnKey(p, Black)
@@ -373,6 +375,17 @@ func parseFEN(p *Pos, epd string) {
 	p.minorKey[Black] = computeMinorKey(p, Black)
 	p.majorKey[White] = computeMajorKey(p, White)
 	p.majorKey[Black] = computeMajorKey(p, Black)
+}
+
+func computeMaterial(p *Pos) int {
+	var material int
+	for sq := 0; sq < 64; sq++ {
+		if p.board[sq] != NO_PC {
+			material += rawValue[p.typeAt(sq)]
+		}
+	}
+	
+	return material
 }
 
 // ================================================================
