@@ -34,16 +34,16 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-//go:embed nets/rodent_8kb_512pw_multilayer_v8.bin
+//go:embed nets/rodent_hm_1536hl_8ob.bin
 var embeddedNet []byte
 
 // NNUE size and scale. AVX2 code supports following net sizes:
-// 64, 128, 256, 384, 512, 768
+// 64, 128, 256, 384, 512, 768, 1024 and 1536
 const (
-	NNUEInputBuckets   = 8
+	NNUEInputBuckets   = 1
 	NNUEInputSize      = 768
-	TotalInputFeatures = NNUEInputBuckets * NNUEInputSize // 6144 features
-	NNUEHiddenSize     = 512
+	TotalInputFeatures = NNUEInputBuckets * NNUEInputSize
+	NNUEHiddenSize     = 1536
 	OutputBuckets      = 8
 	NNUEL0Scale        = 255
 	NNUEL1Scale        = 64
@@ -210,6 +210,8 @@ func nnueAddSingle(a, w *int16) {
 		addSingleAVX2_768(a, w)
 	case 1024:
 		addSingleAVX2_1024(a, w)
+	case 1536:
+		addSingleAVX2_1536(a, w)		
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -235,6 +237,8 @@ func nnueSubSingle(a, w *int16) {
 		subSingleAVX2_768(a, w)
 	case 1024:
 		subSingleAVX2_1024(a, w)
+	case 1536:
+		subSingleAVX2_1536(a, w)
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -260,6 +264,8 @@ func nnueMove(a0, a1 *int16, wFrom0, wTo0, wFrom1, wTo1 *int16) {
 		moveAVX2_768(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
 	case 1024:
 		moveAVX2_1024(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	case 1536:
+		moveAVX2_1536(a0, a1, wFrom0, wTo0, wFrom1, wTo1)		
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -285,6 +291,8 @@ func nnueCapture(a0, a1 *int16, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1 *int16)
 		captureAVX2_768(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
 	case 1024:
 		captureAVX2_1024(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	case 1536:
+		captureAVX2_1536(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)		
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -310,6 +318,8 @@ func nnueCastle(a0, a1 *int16, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, w
 		castleAVX2_768(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
 	case 1024:
 		castleAVX2_1024(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	case 1536:
+		castleAVX2_1536(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)		
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -335,6 +345,8 @@ func nnueEval(a0, a1, w0, w1 *int16, sum *int32) {
 		getEvalAVX2_768(a0, a1, w0, w1, sum)
 	case 1024:
 		getEvalAVX2_1024(a0, a1, w0, w1, sum)
+	case 1536:
+		getEvalAVX2_1536(a0, a1, w0, w1, sum)
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -408,16 +420,23 @@ var zeroWeights [NNUEHiddenSize]int16
 func featureIndex(color, pt, sq, kingSq, perspective int) int {
 	idxSq := sq
 	kSq := kingSq
+
 	if perspective == 1 {
 		idxSq ^= 56
 		kSq ^= 56
 	}
+
 	if singleOptionValue[HorizontalMirroring] == 1 {
 		if kingSq%8 > 3 {
 			idxSq ^= 7
 		}
 	}
-	bucket := kingBucketTable[kSq]
+
+	bucket := 0
+	if NNUEInputBuckets > 1 {
+		bucket = kingBucketTable[kSq]
+	}
+
 	return bucket*NNUEInputSize + (color^perspective)*384 + pt*64 + idxSq
 }
 
@@ -726,7 +745,7 @@ func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update,
 }
 
 func (ss *SearchState) refreshPerspective(p *Pos, acc *Accumulator, perspective int) {
-	if ss != nil {
+	if ss != nil && NNUEHiddenSize < 1536 { // THERE IS A FINNY PROBLEM
 		ss.refreshPerspectiveWithFinny(p, acc, perspective)
 	} else {
 		refreshPerspectivePlain(p, acc, perspective)

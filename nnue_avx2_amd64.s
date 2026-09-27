@@ -798,6 +798,42 @@ subsingle1024_loop:
 	VZEROUPPER
 	RET
 
+	// 1536 neurons = 3072 bytes
+TEXT ·addSingleAVX2_1536(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+
+addsingle1536_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPADDW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+
+	ADDQ $32, R8
+	CMPQ R8, $3072
+	JB addsingle1536_loop
+
+	VZEROUPPER
+	RET
+
+
+// 1536 neurons = 3072 bytes
+TEXT ·subSingleAVX2_1536(SB), NOSPLIT, $0-16
+	MOVQ a+0(FP), AX
+	MOVQ w+8(FP), CX
+	XORQ R8, R8
+
+subsingle1536_loop:
+	VMOVDQU (AX)(R8*1), Y0
+	VPSUBW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+
+	ADDQ $32, R8
+	CMPQ R8, $3072
+	JB subsingle1536_loop
+
+	VZEROUPPER
+	RET
 
 // Each array contains 64 int16 values = 128 bytes.
 // One YMM register holds 16 int16 values = 32 bytes.
@@ -1845,6 +1881,167 @@ castle_1024_loop:
 	VZEROUPPER
 	RET
 
+// functions for 1536 neurons
+
+// func captureAVX2_1536(
+//     a0, a1 *int16,
+//     wTo0, wFrom0, wCap0 *int16,
+//     wTo1, wFrom1, wCap1 *int16,
+// )
+//
+// Capture update:
+//
+//     a0 += wTo0 - wFrom0 - wCap0
+//     a1 += wTo1 - wFrom1 - wCap1
+//
+// 1536 int16 neurons = 3072 bytes.
+// Each loop iteration processes 16 neurons = 32 bytes.
+TEXT ·captureAVX2_1536(SB), NOSPLIT, $0-64
+	MOVQ a0+0(FP), AX
+	MOVQ a1+8(FP), BX
+
+	MOVQ wTo0+16(FP), CX
+	MOVQ wFrom0+24(FP), DX
+	MOVQ wCap0+32(FP), SI
+
+	MOVQ wTo1+40(FP), DI
+	MOVQ wFrom1+48(FP), R8
+	MOVQ wCap1+56(FP), R9
+
+	XORQ R10, R10
+
+capture_1536_loop:
+	// Perspective 0:
+	// a0 += wTo0 - wFrom0 - wCap0
+	VMOVDQU (AX)(R10*1), Y0
+	VPADDW  (CX)(R10*1), Y0, Y0
+	VPSUBW  (DX)(R10*1), Y0, Y0
+	VPSUBW  (SI)(R10*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R10*1)
+
+	// Perspective 1:
+	// a1 += wTo1 - wFrom1 - wCap1
+	VMOVDQU (BX)(R10*1), Y1
+	VPADDW  (DI)(R10*1), Y1, Y1
+	VPSUBW  (R8)(R10*1), Y1, Y1
+	VPSUBW  (R9)(R10*1), Y1, Y1
+	VMOVDQU Y1, (BX)(R10*1)
+
+	ADDQ $32, R10
+
+	// 1536 int16 neurons = 3072 bytes
+	CMPQ R10, $3072
+	JB capture_1536_loop
+
+	VZEROUPPER
+	RET
+
+	// func moveAVX2_1536(
+//     a0, a1 *int16,
+//     wFrom0, wTo0 *int16,
+//     wFrom1, wTo1 *int16,
+// )
+//
+// Move update:
+//
+//     a0 += wTo0 - wFrom0
+//     a1 += wTo1 - wFrom1
+//
+// 1536 int16 neurons = 3072 bytes.
+// Each loop iteration processes 16 neurons = 32 bytes.
+TEXT ·moveAVX2_1536(SB), NOSPLIT, $0-48
+	MOVQ a0+0(FP), AX
+	MOVQ a1+8(FP), BX
+
+	MOVQ wFrom0+16(FP), CX
+	MOVQ wTo0+24(FP), DX
+
+	MOVQ wFrom1+32(FP), SI
+	MOVQ wTo1+40(FP), DI
+
+	XORQ R8, R8
+
+move_loop_1536:
+	// Perspective 0:
+	// a0 += wTo0 - wFrom0
+	VMOVDQU (AX)(R8*1), Y0
+	VPADDW  (DX)(R8*1), Y0, Y0
+	VPSUBW  (CX)(R8*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R8*1)
+
+	// Perspective 1:
+	// a1 += wTo1 - wFrom1
+	VMOVDQU (BX)(R8*1), Y1
+	VPADDW  (DI)(R8*1), Y1, Y1
+	VPSUBW  (SI)(R8*1), Y1, Y1
+	VMOVDQU Y1, (BX)(R8*1)
+
+	ADDQ $32, R8
+
+	// 1536 int16 neurons = 3072 bytes
+	CMPQ R8, $3072
+	JB move_loop_1536
+
+	VZEROUPPER
+	RET
+
+	// func castleAVX2_1536(
+//     a0, a1 *int16,
+//     wKFrom0, wKTo0, wRFrom0, wRTo0 *int16,
+//     wKFrom1, wKTo1, wRFrom1, wRTo1 *int16,
+// )
+//
+// Castle update:
+//
+//     a0 += kingTo - kingFrom + rookTo - rookFrom
+//     a1 += kingTo - kingFrom + rookTo - rookFrom
+//
+// 1536 int16 neurons = 3072 bytes.
+// Each loop iteration processes 16 neurons = 32 bytes.
+TEXT ·castleAVX2_1536(SB), NOSPLIT, $0-80
+	MOVQ a0+0(FP), AX
+	MOVQ a1+8(FP), BX
+
+	MOVQ wKFrom0+16(FP), CX
+	MOVQ wKTo0+24(FP), DX
+	MOVQ wRFrom0+32(FP), SI
+	MOVQ wRTo0+40(FP), DI
+
+	MOVQ wKFrom1+48(FP), R8
+	MOVQ wKTo1+56(FP), R9
+	MOVQ wRFrom1+64(FP), R10
+	MOVQ wRTo1+72(FP), R11
+
+	XORQ R12, R12
+
+castle_1536_loop:
+	// Perspective 0:
+	// a0 += kingTo - kingFrom + rookTo - rookFrom
+	VMOVDQU (AX)(R12*1), Y0
+	VPADDW  (DX)(R12*1), Y0, Y0
+	VPSUBW  (CX)(R12*1), Y0, Y0
+	VPADDW  (DI)(R12*1), Y0, Y0
+	VPSUBW  (SI)(R12*1), Y0, Y0
+	VMOVDQU Y0, (AX)(R12*1)
+
+	// Perspective 1:
+	// a1 += kingTo - kingFrom + rookTo - rookFrom
+	VMOVDQU (BX)(R12*1), Y1
+	VPADDW  (R9)(R12*1), Y1, Y1
+	VPSUBW  (R8)(R12*1), Y1, Y1
+	VPADDW  (R11)(R12*1), Y1, Y1
+	VPSUBW  (R10)(R12*1), Y1, Y1
+	VMOVDQU Y1, (BX)(R12*1)
+
+	ADDQ $32, R12
+
+	// 1536 int16 neurons = 3072 bytes
+	CMPQ R12, $3072
+	JB castle_1536_loop
+
+	VZEROUPPER
+	RET
+
 // EVAL
 
 // func getEvalAVX2_64(
@@ -2715,7 +2912,25 @@ eval768_loop:
 //
 // 1024 int16 neurons = 2048 bytes.
 // Each loop iteration processes 16 neurons per perspective.
-TEXT ·getEvalAVX2_1024(SB), NOSPLIT, $0-40
+
+// func getEvalAVX2_1536(
+//     a0, a1 *int16,
+//     w0, w1 *int16,
+//     sum *int32,
+// )
+//
+// For every neuron:
+//
+//     v = clamp(acc, 0, 255)
+//     sum += v * v * weight
+//
+// Lizard-style exact split:
+//
+//     v² = v * floor(v/2) + v * ceil(v/2)
+//
+// 1536 int16 neurons = 3072 bytes.
+// Each loop iteration processes 16 neurons per perspective.
+TEXT ·getEvalAVX2_1536(SB), NOSPLIT, $0-40
 	MOVQ a0+0(FP), AX
 	MOVQ a1+8(FP), BX
 	MOVQ w0+16(FP), CX
@@ -2740,7 +2955,7 @@ TEXT ·getEvalAVX2_1024(SB), NOSPLIT, $0-40
 
 	XORQ R9, R9
 
-eval1024_loop:
+eval1536_loop:
 	// ------------------------------------------------------------
 	// Perspective 0
 	// ------------------------------------------------------------
@@ -2805,9 +3020,9 @@ eval1024_loop:
 	// 16 int16 neurons = 32 bytes.
 	ADDQ $32, R9
 
-	// 1024 int16 neurons = 2048 bytes.
-	CMPQ R9, $2048
-	JL eval1024_loop
+	// 1536 int16 neurons = 3072 bytes.
+	CMPQ R9, $3072
+	JL eval1536_loop
 
 	// Horizontal sum of eight int32 lanes in Y8.
 	VEXTRACTI128 $1, Y8, X1
@@ -2824,3 +3039,4 @@ eval1024_loop:
 
 	VZEROUPPER
 	RET
+	

@@ -45,6 +45,12 @@ func addSingleAVX2_1024(a, w *int16)
 //go:noescape
 func subSingleAVX2_1024(a, w *int16)
 
+//go:noescape
+func addSingleAVX2_1536(a, w *int16)
+
+//go:noescape
+func subSingleAVX2_1536(a, w *int16)
+
 // CAPTURE
 
 //go:noescape
@@ -269,6 +275,34 @@ func getEvalAVX2_768(
 
 //go:noescape
 func getEvalAVX2_1024(
+	a0, a1 *int16,
+	w0, w1 *int16,
+	sum *int32,
+)
+
+//go:noescape
+func captureAVX2_1536(
+	a0, a1 *int16,
+	wTo0, wFrom0, wCap0 *int16,
+	wTo1, wFrom1, wCap1 *int16,
+)
+
+//go:noescape
+func moveAVX2_1536(
+	a0, a1 *int16,
+	wFrom0, wTo0 *int16,
+	wFrom1, wTo1 *int16,
+)
+
+//go:noescape
+func castleAVX2_1536(
+	a0, a1 *int16,
+	wKFrom0, wKTo0, wRFrom0, wRTo0 *int16,
+	wKFrom1, wKTo1, wRFrom1, wRTo1 *int16,
+)
+
+//go:noescape
+func getEvalAVX2_1536(
 	a0, a1 *int16,
 	w0, w1 *int16,
 	sum *int32,
