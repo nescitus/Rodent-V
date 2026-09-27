@@ -745,7 +745,7 @@ func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update,
 }
 
 func (ss *SearchState) refreshPerspective(p *Pos, acc *Accumulator, perspective int) {
-	if ss != nil && NNUEHiddenSize < 1536 { // THERE IS A FINNY PROBLEM
+	if ss != nil /*&& NNUEHiddenSize < 1536*/ { // THERE IS A FINNY PROBLEM
 		ss.refreshPerspectiveWithFinny(p, acc, perspective)
 	} else {
 		refreshPerspectivePlain(p, acc, perspective)
@@ -754,15 +754,21 @@ func (ss *SearchState) refreshPerspective(p *Pos, acc *Accumulator, perspective 
 
 func (ss *SearchState) refreshPerspectiveWithFinny(p *Pos, acc *Accumulator, perspective int) {
 	kSq := p.kingSq[perspective]
+
 	mirror := 0
 	if singleOptionValue[HorizontalMirroring] == 1 && kSq%8 > 3 {
 		mirror = 1
 	}
+
 	kOri := kSq
 	if perspective == 1 {
 		kOri ^= 56
 	}
-	bucket := kingBucketTable[kOri]
+
+	bucket := 0
+	if NNUEInputBuckets > 1 {
+		bucket = kingBucketTable[kOri]
+	}
 
 	entry := &ss.finny[perspective][mirror][bucket]
 
