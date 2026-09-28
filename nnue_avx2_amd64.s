@@ -1604,6 +1604,152 @@ castle3_loop_512:
 	VZEROUPPER
 	RET
 
+// ---- three-operand (dst = src + delta) variants, 1536 hidden neurons ----
+
+TEXT ·moveAVX2_1536_3op(SB), NOSPLIT, $0-64
+	MOVQ dst0+0(FP), AX
+	MOVQ src0+8(FP), BX
+	MOVQ dst1+16(FP), CX
+	MOVQ src1+24(FP), DX
+
+	MOVQ wFrom0+32(FP), SI
+	MOVQ wTo0+40(FP), DI
+
+	MOVQ wFrom1+48(FP), R8
+	MOVQ wTo1+56(FP), R9
+
+	XORQ R10, R10
+
+move3_loop_1536:
+	// Perspective 0: dst0 = src0 + wTo0 - wFrom0 (64 bytes)
+	VMOVDQU (BX)(R10*1), Y0
+	VMOVDQU 32(BX)(R10*1), Y2
+	VPADDW  (DI)(R10*1), Y0, Y0
+	VPADDW  32(DI)(R10*1), Y2, Y2
+	VPSUBW  (SI)(R10*1), Y0, Y0
+	VPSUBW  32(SI)(R10*1), Y2, Y2
+	VMOVDQU Y0, (AX)(R10*1)
+	VMOVDQU Y2, 32(AX)(R10*1)
+
+	// Perspective 1: dst1 = src1 + wTo1 - wFrom1 (64 bytes)
+	VMOVDQU (DX)(R10*1), Y1
+	VMOVDQU 32(DX)(R10*1), Y3
+	VPADDW  (R9)(R10*1), Y1, Y1
+	VPADDW  32(R9)(R10*1), Y3, Y3
+	VPSUBW  (R8)(R10*1), Y1, Y1
+	VPSUBW  32(R8)(R10*1), Y3, Y3
+	VMOVDQU Y1, (CX)(R10*1)
+	VMOVDQU Y3, 32(CX)(R10*1)
+
+	ADDQ $64, R10
+	CMPQ R10, $3072
+	JB move3_loop_1536
+
+	VZEROUPPER
+	RET
+
+TEXT ·captureAVX2_1536_3op(SB), NOSPLIT, $0-80
+	MOVQ dst0+0(FP), AX
+	MOVQ src0+8(FP), BX
+	MOVQ dst1+16(FP), CX
+	MOVQ src1+24(FP), DX
+
+	MOVQ wTo0+32(FP), SI
+	MOVQ wFrom0+40(FP), DI
+	MOVQ wCap0+48(FP), R8
+
+	MOVQ wTo1+56(FP), R9
+	MOVQ wFrom1+64(FP), R10
+	MOVQ wCap1+72(FP), R11
+
+	XORQ R12, R12
+
+capture3_loop_1536:
+	// Perspective 0: dst0 = src0 + wTo0 - wFrom0 - wCap0 (64 bytes)
+	VMOVDQU (BX)(R12*1), Y0
+	VMOVDQU 32(BX)(R12*1), Y2
+	VPADDW  (SI)(R12*1), Y0, Y0
+	VPADDW  32(SI)(R12*1), Y2, Y2
+	VPSUBW  (DI)(R12*1), Y0, Y0
+	VPSUBW  32(DI)(R12*1), Y2, Y2
+	VPSUBW  (R8)(R12*1), Y0, Y0
+	VPSUBW  32(R8)(R12*1), Y2, Y2
+	VMOVDQU Y0, (AX)(R12*1)
+	VMOVDQU Y2, 32(AX)(R12*1)
+
+	// Perspective 1: dst1 = src1 + wTo1 - wFrom1 - wCap1 (64 bytes)
+	VMOVDQU (DX)(R12*1), Y1
+	VMOVDQU 32(DX)(R12*1), Y3
+	VPADDW  (R9)(R12*1), Y1, Y1
+	VPADDW  32(R9)(R12*1), Y3, Y3
+	VPSUBW  (R10)(R12*1), Y1, Y1
+	VPSUBW  32(R10)(R12*1), Y3, Y3
+	VPSUBW  (R11)(R12*1), Y1, Y1
+	VPSUBW  32(R11)(R12*1), Y3, Y3
+	VMOVDQU Y1, (CX)(R12*1)
+	VMOVDQU Y3, 32(CX)(R12*1)
+
+	ADDQ $64, R12
+	CMPQ R12, $3072
+	JB capture3_loop_1536
+
+	VZEROUPPER
+	RET
+
+TEXT ·castleAVX2_1536_3op(SB), NOSPLIT, $0-96
+	MOVQ dst0+0(FP), AX
+	MOVQ src0+8(FP), BX
+	MOVQ dst1+16(FP), CX
+	MOVQ src1+24(FP), DX
+
+	MOVQ wKFrom0+32(FP), SI
+	MOVQ wKTo0+40(FP), DI
+	MOVQ wRFrom0+48(FP), R8
+	MOVQ wRTo0+56(FP), R9
+
+	MOVQ wKFrom1+64(FP), R10
+	MOVQ wKTo1+72(FP), R11
+	MOVQ wRFrom1+80(FP), R12
+	MOVQ wRTo1+88(FP), R13
+
+	XORQ R14, R14
+
+castle3_loop_1536:
+	// Perspective 0: dst0 = src0 + kingTo - kingFrom + rookTo - rookFrom (64 bytes)
+	VMOVDQU (BX)(R14*1), Y0
+	VMOVDQU 32(BX)(R14*1), Y2
+	VPADDW  (DI)(R14*1), Y0, Y0
+	VPADDW  32(DI)(R14*1), Y2, Y2
+	VPSUBW  (SI)(R14*1), Y0, Y0
+	VPSUBW  32(SI)(R14*1), Y2, Y2
+	VPADDW  (R9)(R14*1), Y0, Y0
+	VPADDW  32(R9)(R14*1), Y2, Y2
+	VPSUBW  (R8)(R14*1), Y0, Y0
+	VPSUBW  32(R8)(R14*1), Y2, Y2
+	VMOVDQU Y0, (AX)(R14*1)
+	VMOVDQU Y2, 32(AX)(R14*1)
+
+	// Perspective 1: dst1 = src1 + kingTo - kingFrom + rookTo - rookFrom (64 bytes)
+	VMOVDQU (DX)(R14*1), Y1
+	VMOVDQU 32(DX)(R14*1), Y3
+	VPADDW  (R11)(R14*1), Y1, Y1
+	VPADDW  32(R11)(R14*1), Y3, Y3
+	VPSUBW  (R10)(R14*1), Y1, Y1
+	VPSUBW  32(R10)(R14*1), Y3, Y3
+	VPADDW  (R13)(R14*1), Y1, Y1
+	VPADDW  32(R13)(R14*1), Y3, Y3
+	VPSUBW  (R12)(R14*1), Y1, Y1
+	VPSUBW  32(R12)(R14*1), Y3, Y3
+	VMOVDQU Y1, (CX)(R14*1)
+	VMOVDQU Y3, 32(CX)(R14*1)
+
+	ADDQ $64, R14
+	CMPQ R14, $3072
+	JB castle3_loop_1536
+
+	VZEROUPPER
+	RET
+
 // functions for 768 hidden neurons
 
 TEXT ·captureAVX2_768(SB), NOSPLIT, $0-64
@@ -2912,6 +3058,115 @@ eval768_loop:
 //
 // 1024 int16 neurons = 2048 bytes.
 // Each loop iteration processes 16 neurons per perspective.
+TEXT ·getEvalAVX2_1024(SB), NOSPLIT, $0-40
+	MOVQ a0+0(FP), AX
+	MOVQ a1+8(FP), BX
+	MOVQ w0+16(FP), CX
+	MOVQ w1+24(FP), DX
+	MOVQ sum+32(FP), SI
+
+	// Y14 = sixteen int16 zeros.
+	VPXOR Y14, Y14, Y14
+
+	// Y15 = sixteen int16 values equal to 255.
+	MOVL $255, R8
+	VMOVD R8, X15
+	VPBROADCASTW X15, Y15
+
+	// Y13 = sixteen int16 values equal to 1 for ceil calculation.
+	MOVL $1, R8
+	VMOVD R8, X13
+	VPBROADCASTW X13, Y13
+
+	// Y8 accumulates eight int32 partial sums.
+	VPXOR Y8, Y8, Y8
+
+	XORQ R9, R9
+
+eval1024_loop:
+	// ------------------------------------------------------------
+	// Perspective 0
+	// ------------------------------------------------------------
+
+	// Load 16 accumulator values and 16 signed weights.
+	VMOVDQU (AX)(R9*1), Y0
+	VMOVDQU (CX)(R9*1), Y1
+
+	// SCReLU clipping: v = clamp(acc, 0, 255).
+	VPMAXSW Y14, Y0, Y0
+	VPMINSW Y15, Y0, Y0
+
+	// Y2 = floor(v / 2)
+	// Y3 = ceil(v / 2) = (v + 1) / 2
+	VPSRLW $1, Y0, Y2
+	VPADDW Y13, Y0, Y3
+	VPSRLW $1, Y3, Y3
+
+	// Y2 = v * floor(v / 2)
+	// Y3 = v * ceil(v / 2)
+	VPMULLW Y0, Y2, Y2
+	VPMULLW Y0, Y3, Y3
+
+	// Multiply partial products by output weights and horizontally add pairs.
+	VPMADDWD Y1, Y2, Y2
+	VPMADDWD Y1, Y3, Y3
+
+	// Accumulate into Y8.
+	VPADDD Y2, Y8, Y8
+	VPADDD Y3, Y8, Y8
+
+	// ------------------------------------------------------------
+	// Perspective 1
+	// ------------------------------------------------------------
+
+	VMOVDQU (BX)(R9*1), Y0
+	VMOVDQU (DX)(R9*1), Y1
+
+	// SCReLU clipping: v = clamp(acc, 0, 255).
+	VPMAXSW Y14, Y0, Y0
+	VPMINSW Y15, Y0, Y0
+
+	// Y2 = floor(v / 2)
+	// Y3 = ceil(v / 2) = (v + 1) / 2
+	VPSRLW $1, Y0, Y2
+	VPADDW Y13, Y0, Y3
+	VPSRLW $1, Y3, Y3
+
+	// Y2 = v * floor(v / 2)
+	// Y3 = v * ceil(v / 2)
+	VPMULLW Y0, Y2, Y2
+	VPMULLW Y0, Y3, Y3
+
+	// Multiply partial products by output weights and horizontally add pairs.
+	VPMADDWD Y1, Y2, Y2
+	VPMADDWD Y1, Y3, Y3
+
+	// Accumulate into Y8.
+	VPADDD Y2, Y8, Y8
+	VPADDD Y3, Y8, Y8
+
+	// 16 int16 neurons = 32 bytes.
+	ADDQ $32, R9
+
+	// 1024 int16 neurons = 2048 bytes.
+	CMPQ R9, $2048
+	JL eval1024_loop
+
+	// Horizontal sum of eight int32 lanes in Y8.
+	VEXTRACTI128 $1, Y8, X1
+	VPADDD X1, X8, X8
+
+	VPSHUFD $0x4E, X8, X1
+	VPADDD X1, X8, X8
+
+	VPSHUFD $0xB1, X8, X1
+	VPADDD X1, X8, X8
+
+	VMOVD X8, R8
+	MOVL R8, (SI)
+
+	VZEROUPPER
+	RET
 
 // func getEvalAVX2_1536(
 //     a0, a1 *int16,

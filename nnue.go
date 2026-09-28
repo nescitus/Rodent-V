@@ -53,8 +53,8 @@ const (
 	OutputBucketNetSize      = (NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + OutputBuckets*2*NNUEHiddenSize + OutputBuckets) * 2
 	FourBucketSingleNetSize  = (4*NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + 2*NNUEHiddenSize + 1) * 2
 	FourBucketOutputNetSize  = (4*NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + OutputBuckets*2*NNUEHiddenSize + OutputBuckets) * 2
-	EightBucketSingleNetSize = (TotalInputFeatures*NNUEHiddenSize + NNUEHiddenSize + 2*NNUEHiddenSize + 1) * 2
-	EightBucketOutputNetSize = (TotalInputFeatures*NNUEHiddenSize + NNUEHiddenSize + OutputBuckets*2*NNUEHiddenSize + OutputBuckets) * 2
+	EightBucketSingleNetSize = (8*NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + 2*NNUEHiddenSize + 1) * 2
+	EightBucketOutputNetSize = (8*NNUEInputSize*NNUEHiddenSize + NNUEHiddenSize + OutputBuckets*2*NNUEHiddenSize + OutputBuckets) * 2
 
 	// Multilayer Dense Head constants ((16 -> 32 -> 1)x8)
 	NNUEMultilayerL1Size   = 16
@@ -373,6 +373,10 @@ func nnueMove3(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1 *int16) {
 		moveAVX2_512_3op(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1)
 		return
 	}
+	if NNUEHiddenSize == 1536 {
+		moveAVX2_1536_3op(dst0, src0, dst1, src1, wFrom0, wTo0, wFrom1, wTo1)
+		return
+	}
 	copyAccValues(dst0, src0)
 	copyAccValues(dst1, src1)
 	nnueMove(dst0, dst1, wFrom0, wTo0, wFrom1, wTo1)
@@ -387,6 +391,10 @@ func nnueCapture3(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCa
 		captureAVX2_512_3op(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
 		return
 	}
+	if NNUEHiddenSize == 1536 {
+		captureAVX2_1536_3op(dst0, src0, dst1, src1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+		return
+	}
 	copyAccValues(dst0, src0)
 	copyAccValues(dst1, src1)
 	nnueCapture(dst0, dst1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
@@ -399,6 +407,10 @@ func nnueCastle3(dst0, src0, dst1, src1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1
 	}
 	if NNUEHiddenSize == 512 {
 		castleAVX2_512_3op(dst0, src0, dst1, src1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+		return
+	}
+	if NNUEHiddenSize == 1536 {
+		castleAVX2_1536_3op(dst0, src0, dst1, src1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
 		return
 	}
 	copyAccValues(dst0, src0)
@@ -696,7 +708,7 @@ func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update,
 			toBucket := kingBucketTable[u.to]
 			fromMirror := (u.from%8 > 3)
 			toMirror := (u.to%8 > 3)
-			if fromBucket != toBucket || (singleOptionValue[HorizontalMirroring] == 1 && fromMirror != toMirror) {
+			if (NNUEInputBuckets > 1 && fromBucket != toBucket) || (singleOptionValue[HorizontalMirroring] == 1 && fromMirror != toMirror) {
 				refresh0 = true
 			}
 		} else {
@@ -704,7 +716,7 @@ func (acc *Accumulator) applyPendingChanges(src *Accumulator, p *Pos, u *Update,
 			toBucket := kingBucketTable[u.to^56]
 			fromMirror := (u.from%8 > 3)
 			toMirror := (u.to%8 > 3)
-			if fromBucket != toBucket || (singleOptionValue[HorizontalMirroring] == 1 && fromMirror != toMirror) {
+			if (NNUEInputBuckets > 1 && fromBucket != toBucket) || (singleOptionValue[HorizontalMirroring] == 1 && fromMirror != toMirror) {
 				refresh1 = true
 			}
 		}
