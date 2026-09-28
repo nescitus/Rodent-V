@@ -34,16 +34,16 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-//go:embed nets/rodent_8kb_512pw_multilayer_v8.bin
+//go:embed nets/rodent_hm_1536hl_8ob.bin
 var embeddedNet []byte
 
 // NNUE size and scale. AVX2 code supports following net sizes:
-// 64, 128, 256, 384, 512, 768
+// 64, 128, 256, 384, 512, 768, 1024, 1536
 const (
-	NNUEInputBuckets   = 8
+	NNUEInputBuckets   = 1
 	NNUEInputSize      = 768
-	TotalInputFeatures = NNUEInputBuckets * NNUEInputSize // 6144 features
-	NNUEHiddenSize     = 512
+	TotalInputFeatures = NNUEInputBuckets * NNUEInputSize // 768 features
+	NNUEHiddenSize     = 1536
 	OutputBuckets      = 8
 	NNUEL0Scale        = 255
 	NNUEL1Scale        = 64
@@ -80,25 +80,8 @@ const (
 	MultilayerDualActNetSize = (TotalInputFeatures*NNUEHiddenSize+NNUEHiddenSize)*2 + MultilayerDenseHeadDualActSize
 )
 
-// 8 King Input Buckets Layout (Horizontally Mirrored across 64 squares)
-// Bucket 0: Corner King on Rank 1 (a1, h1)
-// Bucket 1: Castled King on Rank 1 (b1, g1)
-// Bucket 2: Queenside Castled / Stepped King on Rank 1 (c1, f1)
-// Bucket 3: Central Uncastled King on Rank 1 (d1, e1)
-// Bucket 4: Flank / Fianchetto King on Rank 2 (a2, b2, g2, h2)
-// Bucket 5: Central King on Rank 2 (c2, d2, e2, f2)
-// Bucket 6: Midfield Active King (Ranks 3-4)
-// Bucket 7: Enemy Territory (Ranks 5-8)
-var kingBucketTable = [64]int{
-	0, 1, 2, 3, 3, 2, 1, 0, // Rank 1: a1..h1 (0..7)
-	4, 4, 5, 5, 5, 5, 4, 4, // Rank 2: a2..h2 (8..15)
-	6, 6, 6, 6, 6, 6, 6, 6, // Rank 3: a3..h3 (16..23)
-	6, 6, 6, 6, 6, 6, 6, 6, // Rank 4: a4..h4 (24..31)
-	7, 7, 7, 7, 7, 7, 7, 7, // Rank 5: a5..h5 (32..39)
-	7, 7, 7, 7, 7, 7, 7, 7, // Rank 6: a6..h6 (40..47)
-	7, 7, 7, 7, 7, 7, 7, 7, // Rank 7: a7..h7 (48..55)
-	7, 7, 7, 7, 7, 7, 7, 7, // Rank 8: a8..h8 (56..63)
-}
+// King Input Buckets Layout: 1 bucket for all squares (no king input buckets)
+var kingBucketTable = [64]int{}
 
 // Types of NNUE updates
 type AccUpdateKind int
@@ -210,6 +193,8 @@ func nnueAddSingle(a, w *int16) {
 		addSingleAVX2_768(a, w)
 	case 1024:
 		addSingleAVX2_1024(a, w)
+	case 1536:
+		addSingleAVX2_1536(a, w)
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -235,6 +220,8 @@ func nnueSubSingle(a, w *int16) {
 		subSingleAVX2_768(a, w)
 	case 1024:
 		subSingleAVX2_1024(a, w)
+	case 1536:
+		subSingleAVX2_1536(a, w)
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -260,6 +247,8 @@ func nnueMove(a0, a1 *int16, wFrom0, wTo0, wFrom1, wTo1 *int16) {
 		moveAVX2_768(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
 	case 1024:
 		moveAVX2_1024(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	case 1536:
+		moveAVX2_1536(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -285,6 +274,8 @@ func nnueCapture(a0, a1 *int16, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1 *int16)
 		captureAVX2_768(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
 	case 1024:
 		captureAVX2_1024(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	case 1536:
+		captureAVX2_1536(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -310,6 +301,8 @@ func nnueCastle(a0, a1 *int16, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, w
 		castleAVX2_768(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
 	case 1024:
 		castleAVX2_1024(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	case 1536:
+		castleAVX2_1536(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
 	default:
 		panic("unsupported NNUE hidden size")
 	}
@@ -335,6 +328,8 @@ func nnueEval(a0, a1, w0, w1 *int16, sum *int32) {
 		getEvalAVX2_768(a0, a1, w0, w1, sum)
 	case 1024:
 		getEvalAVX2_1024(a0, a1, w0, w1, sum)
+	case 1536:
+		getEvalAVX2_1536(a0, a1, w0, w1, sum)
 	default:
 		panic("unsupported NNUE hidden size")
 	}

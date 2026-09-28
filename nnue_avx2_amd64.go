@@ -2,6 +2,8 @@
 
 package main
 
+import "unsafe"
+
 // ADD / SUB SINGLE
 //go:noescape
 func addSingleAVX2_64(a, w *int16)
@@ -289,3 +291,74 @@ func getEvalMultilayerAVX2(
 	sum *int32,
 )
 
+// 1536 NEURONS AVX2 (1024 + 512)
+func addSingleAVX2_1536(a, w *int16) {
+	addSingleAVX2_1024(a, w)
+	addSingleAVX2_512(
+		(*int16)(unsafe.Add(unsafe.Pointer(a), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(w), 2048)),
+	)
+}
+
+func subSingleAVX2_1536(a, w *int16) {
+	subSingleAVX2_1024(a, w)
+	subSingleAVX2_512(
+		(*int16)(unsafe.Add(unsafe.Pointer(a), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(w), 2048)),
+	)
+}
+
+func moveAVX2_1536(a0, a1, wFrom0, wTo0, wFrom1, wTo1 *int16) {
+	moveAVX2_1024(a0, a1, wFrom0, wTo0, wFrom1, wTo1)
+	moveAVX2_512(
+		(*int16)(unsafe.Add(unsafe.Pointer(a0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(a1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wFrom0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wTo0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wFrom1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wTo1), 2048)),
+	)
+}
+
+func captureAVX2_1536(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1 *int16) {
+	captureAVX2_1024(a0, a1, wTo0, wFrom0, wCap0, wTo1, wFrom1, wCap1)
+	captureAVX2_512(
+		(*int16)(unsafe.Add(unsafe.Pointer(a0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(a1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wTo0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wFrom0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wCap0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wTo1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wFrom1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wCap1), 2048)),
+	)
+}
+
+func castleAVX2_1536(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1 *int16) {
+	castleAVX2_1024(a0, a1, wKFrom0, wKTo0, wRFrom0, wRTo0, wKFrom1, wKTo1, wRFrom1, wRTo1)
+	castleAVX2_512(
+		(*int16)(unsafe.Add(unsafe.Pointer(a0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(a1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wKFrom0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wKTo0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wRFrom0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wRTo0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wKFrom1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wKTo1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wRFrom1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(wRTo1), 2048)),
+	)
+}
+
+func getEvalAVX2_1536(a0, a1, w0, w1 *int16, sum *int32) {
+	var s1, s2 int32
+	getEvalAVX2_1024(a0, a1, w0, w1, &s1)
+	getEvalAVX2_512(
+		(*int16)(unsafe.Add(unsafe.Pointer(a0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(a1), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(w0), 2048)),
+		(*int16)(unsafe.Add(unsafe.Pointer(w1), 2048)),
+		&s2,
+	)
+	*sum = s1 + s2
+}

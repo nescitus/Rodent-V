@@ -88,7 +88,7 @@ func init() {
 	personalityFile = "personalities/rodent.txt"
 	guideBookPath = "books/empty.bin"
 	mainBookPath = "books/empty.bin"
-	nnuePath = "nets/rodent_8kb_512pw_multilayer_v8.bin"
+	nnuePath = "nets/rodent_hm_1536hl_8ob.bin"
 
 	registerSingleOption(HcePerc, "hceWeight", 0, 0, 256, !readPersonalityFiles)
 	registerSingleOption(NnuePerc, "nnueWeight", 100, 0, 256, !readPersonalityFiles)
