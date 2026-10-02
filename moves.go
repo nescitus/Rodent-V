@@ -143,10 +143,10 @@ func makeMove(p *Pos, u *Update, r *Revert, move int) {
 			p.nonPawnKey[enemy] ^= hashDelta // we know implicitly that we are not capturing the king
 		}
 		if u.captType == N || u.movingType == B {
-			p.minorKey[side] ^= hashDelta
+			p.minorKey[enemy] ^= hashDelta
 		}
 		if u.captType == R || u.movingType == Q {
-			p.majorKey[side] ^= hashDelta
+			p.majorKey[enemy] ^= hashDelta
 		}
 		p.colorBB[enemy] ^= squareBit(u.to)
 		p.typeBB[u.captType] ^= squareBit(u.to)
